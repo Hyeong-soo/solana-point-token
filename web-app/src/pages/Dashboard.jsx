@@ -1,0 +1,303 @@
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { useConnection, useWallet } from '../context/WalletContext';
+import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
+import { PublicKey } from '@solana/web3.js';
+import { MINT_ADDRESS } from '../utils/constants';
+
+import { Plus, Send, ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, AlertCircle, Calculator } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { db } from '../utils/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+
+const Dashboard = () => {
+    const { connection } = useConnection();
+    const { publicKey } = useWallet();
+    const navigate = useNavigate();
+    const [balance, setBalance] = useState(0);
+    const [loading, setLoading] = useState(false);
+    const [history, setHistory] = useState([]);
+    const [historyLoading, setHistoryLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    // Lock to prevent double fetching
+    const isFetching = useRef(false);
+
+    // Real Pending Requests from Firebase
+    const [pendingRequests, setPendingRequests] = useState([]);
+
+    // Listen for pending requests
+    useEffect(() => {
+        if (!publicKey) return;
+
+        const q = query(
+            collection(db, "requests"),
+            where("to", "==", publicKey.toBase58()),
+            where("status", "==", "pending")
+        );
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const requests = [];
+            snapshot.forEach((doc) => {
+                requests.push({ id: doc.id, ...doc.data() });
+            });
+            setPendingRequests(requests);
+        }, (error) => {
+            console.error("Firestore Error:", error);
+            if (error.code === 'permission-denied') {
+                alert("Firestore Permission Denied. Please check your Firestore Rules in Firebase Console (set to Test Mode).");
+            }
+        });
+
+        return () => unsubscribe();
+    }, [publicKey]);
+
+    const fetchData = useCallback(async () => {
+        if (!publicKey || isFetching.current) return;
+
+        isFetching.current = true;
+        setLoading(true);
+        setHistoryLoading(true);
+        setError(null);
+
+        try {
+            const userTokenAddress = await getAssociatedTokenAddress(new PublicKey(MINT_ADDRESS), publicKey);
+
+            // 1. Fetch Balance
+            try {
+                const info = await getAccount(connection, userTokenAddress, 'confirmed');
+                setBalance(Number(info.amount) / 100);
+            } catch (e) {
+                setBalance(0);
+            }
+
+            // 2. Fetch History
+            // Fetch 5 signatures
+            const signatures = await connection.getSignaturesForAddress(
+                publicKey,
+                { limit: 5 },
+                'confirmed'
+            );
+
+            if (signatures.length > 0) {
+                const parsedHistory = [];
+
+                // SEQUENTIAL FETCHING (Required for Public Devnet to avoid 429)
+                // Batch fetching (getParsedTransactions) fails consistently on public nodes.
+                for (let i = 0; i < signatures.length; i++) {
+                    const sig = signatures[i];
+                    try {
+                        // 500ms delay removed for production speed
+                        // if (i > 0) await new Promise(resolve => setTimeout(resolve, 500));
+
+                        const tx = await connection.getParsedTransaction(
+                            sig.signature,
+                            { maxSupportedTransactionVersion: 0, commitment: 'confirmed' }
+                        );
+
+                        if (!tx) continue;
+
+                        const mintAddressString = MINT_ADDRESS.toBase58();
+                        const signature = sig.signature;
+                        const date = new Date(tx.blockTime * 1000).toLocaleDateString();
+
+                        let type = 'Unknown';
+                        let amount = 0;
+                        let isOutgoing = false;
+
+                        const preBalance = tx.meta.preTokenBalances?.find(b => b.mint === mintAddressString && b.owner === publicKey.toBase58());
+                        const postBalance = tx.meta.postTokenBalances?.find(b => b.mint === mintAddressString && b.owner === publicKey.toBase58());
+
+                        const pre = preBalance ? Number(preBalance.uiTokenAmount.amount) : 0;
+                        const post = postBalance ? Number(postBalance.uiTokenAmount.amount) : 0;
+                        const diff = post - pre;
+
+                        if (diff > 0) {
+                            type = 'Received';
+                            amount = diff / 100;
+                            isOutgoing = false;
+                        } else if (diff < 0) {
+                            type = 'Sent';
+                            amount = Math.abs(diff) / 100;
+                            isOutgoing = true;
+                        } else {
+                            type = 'Interaction';
+                            amount = 0;
+                            isOutgoing = true;
+                        }
+
+                        parsedHistory.push({
+                            signature,
+                            date,
+                            type,
+                            amount,
+                            isOutgoing
+                        });
+
+                    } catch (innerErr) {
+                        console.error(`Failed to fetch tx ${sig.signature}:`, innerErr);
+                    }
+                }
+
+                setHistory(parsedHistory);
+            } else {
+                setHistory([]);
+            }
+
+        } catch (e) {
+            console.error('Error fetching data:', e);
+            if (e.message.includes('429')) {
+                setError("Network busy. Retrying later.");
+            } else {
+                setError("Failed to fetch data.");
+            }
+        } finally {
+            setLoading(false);
+            setHistoryLoading(false);
+            setTimeout(() => {
+                isFetching.current = false;
+            }, 1000);
+        }
+    }, [publicKey, connection]);
+
+    // Initial fetch only
+    useEffect(() => {
+        if (publicKey && !isFetching.current) {
+            fetchData();
+        }
+    }, [publicKey]);
+
+    return (
+        <div className="space-y-6">
+            {/* Balance Card */}
+            <div className="bg-gradient-to-br from-postech-600 to-orange-700 rounded-3xl p-8 text-white shadow-xl relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
+                <div className="relative z-10">
+                    <div className="flex justify-between items-start mb-8">
+                        <div>
+                            <p className="text-postech-100 font-medium mb-1">Total Balance</p>
+                            <h1 className="text-5xl font-bold tracking-tight">
+                                {loading ? '...' : balance.toLocaleString()} <span className="text-2xl font-normal text-postech-200">P</span>
+                            </h1>
+                        </div>
+                        <div className="bg-white/20 backdrop-blur-md p-2 rounded-xl">
+                            <div className="w-8 h-8 bg-white rounded-full flex items-center justify-center text-postech-600 font-bold">P</div>
+                        </div>
+                    </div>
+                    <div className="flex gap-4">
+                        <Link to="/buy" className="flex-1 bg-white text-postech-600 py-3 rounded-xl font-bold text-center hover:bg-postech-50 transition-colors flex items-center justify-center gap-2">
+                            <Plus size={20} />
+                            Buy
+                        </Link>
+                        <Link to="/send" className="flex-1 bg-postech-500/30 backdrop-blur-md text-white py-3 rounded-xl font-bold text-center hover:bg-postech-500/40 transition-colors flex items-center justify-center gap-2 border border-white/10">
+                            <Send size={20} />
+                            Send
+                        </Link>
+                    </div>
+                </div>
+            </div>
+
+            {/* Quick Actions */}
+            <div className="grid grid-cols-3 gap-3">
+                <Link to="/send" className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-2 hover:bg-gray-50 transition-colors">
+                    <div className="w-10 h-10 bg-postech-100 rounded-full flex items-center justify-center text-postech-600">
+                        <ArrowUpRight size={20} />
+                    </div>
+                    <span className="font-medium text-gray-700 text-xs">Send</span>
+                </Link>
+                <Link to="/request" className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-2 hover:bg-gray-50 transition-colors">
+                    <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600">
+                        <ArrowDownLeft size={20} />
+                    </div>
+                    <span className="font-medium text-gray-700 text-xs">Request</span>
+                </Link>
+                <Link to="/split" className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-2 hover:bg-gray-50 transition-colors">
+                    <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-600">
+                        <Calculator size={20} />
+                    </div>
+                    <span className="font-medium text-gray-700 text-xs">Split Bill</span>
+                </Link>
+            </div>
+
+            {/* Pending Requests */}
+            {pendingRequests.length > 0 && (
+                <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-3">Pending Requests</h3>
+                    <div className="space-y-3">
+                        {pendingRequests.map((req, i) => (
+                            <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600">
+                                        <ArrowDownLeft size={20} />
+                                    </div>
+                                    <div>
+                                        <p className="font-medium text-gray-800">{req.fromName || 'Someone'} requested</p>
+                                        <p className="text-xs text-gray-400">{req.createdAt?.toDate().toLocaleDateString() || 'Today'}</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <span className="font-bold text-gray-800">{req.amount.toLocaleString()} P</span>
+                                    <button
+
+                                        onClick={() => navigate('/send', {
+                                            state: {
+                                                contact: { name: req.fromName || 'Unknown', address: req.from },
+                                                amount: req.amount,
+                                                requestId: req.id
+                                            }
+                                        })}
+                                        className="bg-postech-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-postech-700 transition-colors"
+                                    >
+                                        Pay
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Recent Activity (Real) */}
+            <div>
+                <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-lg font-bold text-gray-800">Recent Activity</h3>
+                    <div className="flex items-center gap-2">
+                        {error && <span className="text-xs text-red-500 flex items-center gap-1"><AlertCircle size={12} /> {error}</span>}
+                        <button
+                            onClick={fetchData}
+                            disabled={historyLoading}
+                            className={`p-2 rounded-full transition-colors ${historyLoading ? 'text-gray-300 cursor-not-allowed' : 'text-gray-400 hover:text-postech-600 hover:bg-postech-50'}`}
+                        >
+                            <RefreshCw size={16} className={historyLoading ? "animate-spin" : ""} />
+                        </button>
+                    </div>
+                </div>
+                <div className="space-y-3">
+                    {history.length === 0 ? (
+                        <div className="text-center py-8 text-gray-400 text-sm">
+                            {historyLoading ? 'Loading...' : 'No transactions yet'}
+                        </div>
+                    ) : (
+                        history.map((tx, i) => (
+                            <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${tx.isOutgoing ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-600'}`}>
+                                        {tx.isOutgoing ? <ArrowUpRight size={20} /> : <ArrowDownLeft size={20} />}
+                                    </div>
+                                    <div>
+                                        <p className="font-bold text-gray-800">{tx.type}</p>
+                                        <p className="text-xs text-gray-400">{tx.date}</p>
+                                    </div>
+                                </div>
+                                <span className={`font-bold ${tx.isOutgoing ? 'text-gray-800' : 'text-green-600'}`}>
+                                    {tx.isOutgoing ? '-' : '+'}{tx.amount.toLocaleString()} P
+                                </span>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default Dashboard;
