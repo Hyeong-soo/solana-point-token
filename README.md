@@ -33,52 +33,83 @@ A blockchain-based campus currency system built on **Solana**, designed for a se
 
 ---
 
-## 📂 Project Structure
+## ⚡️ Getting Started (Step-by-Step)
 
-```
-solana-point-token/
-├── web-app/            # React Frontend Application
-├── create_token.js     # Script to mint POINT token
-├── airdrop.js          # Script to airdrop SOL/POINT
-
-└── ...
-```
-
----
-
-## ⚡️ Getting Started
+Follow these instructions to set up and run the project locally.
 
 ### 1. Prerequisites
-- Node.js (v16+)
-- Firebase Project (configured in `web-app/src/utils/firebase.js`)
+- **Node.js** (v16 or higher) installed.
+- **Git** installed.
+- A **Google Account** (for Firebase).
 
-### 2. Installation
+### 2. Firebase Setup (Required)
+This project uses Firebase for user authentication and database.
 
-```bash
-cd web-app
-npm install
-```
+1.  Go to the [Firebase Console](https://console.firebase.google.com/).
+2.  Click **"Add project"** and give it a name (e.g., `solana-point-app`).
+3.  **Authentication**:
+    - Go to **Build > Authentication**.
+    - Click **"Get Started"**.
+    - Select **"Email/Password"** as a Sign-in provider and **Enable** it.
+4.  **Firestore Database**:
+    - Go to **Build > Firestore Database**.
+    - Click **"Create Database"**.
+    - Choose **"Start in test mode"** (for development purposes).
+    - Select a location (e.g., `asia-northeast3` for Seoul).
+5.  **Get Configuration**:
+    - Click the **Gear icon (Project settings)** > **General**.
+    - Scroll down to "Your apps" and click the **Web (</>)** icon.
+    - Register app (nickname: `WebApp`).
+    - **Copy the `firebaseConfig` object**.
 
-### 3. Run Development Server
+### 3. Project Configuration
+1.  Clone the repository:
+    ```bash
+    git clone <repository-url>
+    cd solana-point-token
+    ```
+2.  Navigate to the web app directory:
+    ```bash
+    cd web-app
+    ```
+3.  Install dependencies:
+    ```bash
+    npm install
+    ```
+4.  **Configure Firebase**:
+    - Open `src/utils/firebase.js`.
+    - Replace the `firebaseConfig` object with the one you copied in Step 2.
+
+### 4. Run the Application
+Start the development server:
 
 ```bash
 npm run dev
 ```
 
-The app will be available at `http://localhost:5173`.
+Open your browser and visit `http://localhost:5173`.
 
 ---
 
-## 📝 Scripts
+## � Project Structure
 
-- **`node create_token.js`**: Mints the initial supply of POINT tokens.
-- **`node airdrop.js`**: Airdrops SOL to the admin wallet.
-
+```
+solana-point-token/
+├── web-app/            # React Frontend Application
+│   ├── src/
+│   │   ├── components/ # Reusable UI components
+│   │   ├── context/    # Wallet & Auth Context
+│   │   ├── pages/      # Application Pages (Login, Dashboard, etc.)
+│   │   └── utils/      # Firebase config & Constants
+├── create_token.js     # Script to mint POINT token (Admin only)
+├── airdrop.js          # Script to airdrop SOL (Admin only)
+└── README.md
+```
 
 ---
 
-## ⚠️ Note
+## ⚠️ Important Notes
 
-This project is a **Proof of Concept (PoC)**.
-- Private keys are stored in Firestore for demonstration purposes. **Do not use in production without a secure KMS.**
-- Runs on **Solana Devnet**.
+- **Devnet Only**: This application is configured to run on the Solana Devnet.
+- **Security**: Private keys are stored in Firestore for demonstration purposes. **Do not use this code in a production environment without implementing a secure Key Management System (KMS).**
+- **Firestore Rules**: In "Test Mode", anyone can read/write to your database. For production, you must configure Firestore Security Rules.
