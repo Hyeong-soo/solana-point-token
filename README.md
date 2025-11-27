@@ -81,9 +81,19 @@ This project uses Firebase for user authentication and database.
     ```bash
     npm install
     ```
-4.  **Configure Firebase**:
-    - Open `src/utils/firebase.js`.
-    - Replace the `firebaseConfig` object with the one you copied in Step 2.
+4.  **Configure Environment Variables**:
+    - Create a `.env` file in the `web-app` directory.
+    - Add the following variables (get values from Firebase Console):
+    ```env
+    VITE_FIREBASE_API_KEY=your_api_key
+    VITE_FIREBASE_AUTH_DOMAIN=your_project_id.firebaseapp.com
+    VITE_FIREBASE_PROJECT_ID=your_project_id
+    VITE_FIREBASE_STORAGE_BUCKET=your_project_id.firebasestorage.app
+    VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+    VITE_FIREBASE_APP_ID=your_app_id
+    VITE_FIREBASE_MEASUREMENT_ID=your_measurement_id
+    VITE_TREASURY_SECRET=[...] # Array of numbers for treasury keypair
+    ```
 
 ### 4. Run the Application
 Start the development server:
