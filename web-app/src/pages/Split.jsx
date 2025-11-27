@@ -15,6 +15,7 @@ const Split = () => {
     const [friends, setFriends] = useState([]);
     const [selectedFriends, setSelectedFriends] = useState([]);
     const [totalAmount, setTotalAmount] = useState('');
+    const [chatName, setChatName] = useState('');
     const [shares, setShares] = useState({}); // { friendId: amount }
     const [loading, setLoading] = useState(false);
 
@@ -98,30 +99,73 @@ const Split = () => {
             }
             const senderAddress = publicKey ? publicKey.toBase58() : "Unknown";
 
-            // Create requests for each selected friend
-            const promises = selectedFriends.map(friend => {
-                const amount = shares[friend.studentId];
-                if (!amount || amount <= 0) return Promise.resolve();
+            // 1. Prepare Participants Data
+            // Include Myself
+            const participants = [
+                {
+                    uid: auth.currentUser.uid,
+                    name: senderName,
+                    address: senderAddress,
+                    amount: myShare,
+                    status: 'paid', // I paid the bill initially
+                    role: 'payer'
+                }
+            ];
 
-                return addDoc(collection(db, "requests"), {
-                    from: senderAddress,
-                    fromName: senderName,
-                    to: friend.address,
-                    toName: friend.name,
-                    amount: Number(amount),
+            // Add Friends
+            selectedFriends.forEach(friend => {
+                participants.push({
+                    uid: friend.uid, // Ensure we have UID from friend selection
+                    name: friend.name,
+                    address: friend.address,
+                    amount: shares[friend.studentId],
                     status: 'pending',
-                    createdAt: serverTimestamp(),
-                    type: 'split'
+                    role: 'payee'
                 });
             });
 
-            await Promise.all(promises);
+            // 2. Create Settlement Document
+            const settlementRef = await addDoc(collection(db, "settlements"), {
+                creatorId: auth.currentUser.uid,
+                totalAmount: Number(totalAmount),
+                participants: participants,
+                createdAt: serverTimestamp(),
+                status: 'active'
+            });
 
-            alert(`Split request sent to ${selectedFriends.length} friends!`);
-            navigate('/');
+            // 3. Create Chat Document
+            const chatTitle = chatName.trim() || `Split: ${Number(totalAmount).toLocaleString()} P`;
+            const participantUids = participants.map(p => p.uid);
+
+            const chatRef = await addDoc(collection(db, "chats"), {
+                settlementId: settlementRef.id,
+                title: chatTitle,
+                participants: participantUids,
+                createdAt: serverTimestamp(),
+                lastMessage: "Settlement created",
+                lastMessageAt: serverTimestamp(),
+                status: 'active'
+            });
+
+            // 4. Create Initial System Message
+            await addDoc(collection(db, "chats", chatRef.id, "messages"), {
+                text: `${senderName} created a split bill for ${Number(totalAmount).toLocaleString()} P`,
+                senderId: 'system',
+                senderName: 'System',
+                createdAt: serverTimestamp(),
+                type: 'system'
+            });
+
+            // 5. Send Requests (Optional: Keep for notification, or rely on Chat)
+            // We removed creating individual "request" docs to avoid redundancy.
+            // Users should check the "Pending Settlements" or the Chat Room.
+
+            alert(`Split created! Redirecting to chat...`);
+            navigate(`/chats/${chatRef.id}`);
+
         } catch (error) {
-            console.error("Error sending split requests:", error);
-            alert("Failed to send requests: " + error.message);
+            console.error("Error creating split:", error);
+            alert("Failed to create split: " + error.message);
         } finally {
             setLoading(false);
         }
@@ -185,6 +229,17 @@ const Split = () => {
             ) : (
                 // Step 2: Enter Amount
                 <div className="space-y-6">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">Chat Name (Optional)</label>
+                        <input
+                            type="text"
+                            value={chatName}
+                            onChange={(e) => setChatName(e.target.value)}
+                            className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-4 focus:outline-none focus:border-postech-500 transition-colors"
+                            placeholder={`e.g. Lunch at Student Cafeteria`}
+                        />
+                    </div>
+
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-2">Total Amount</label>
                         <div className="relative">

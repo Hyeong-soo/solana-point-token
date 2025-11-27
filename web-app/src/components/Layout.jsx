@@ -1,7 +1,7 @@
 import React from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
-import { Home, Send, PlusCircle, ArrowDownLeft, LogOut, Users, User } from 'lucide-react';
+import { Home, Send, PlusCircle, ArrowDownLeft, LogOut, Users, User, MessageCircle } from 'lucide-react';
 
 
 const Layout = ({ children }) => {
@@ -27,22 +27,14 @@ const Layout = ({ children }) => {
                 </main>
 
                 {/* Bottom Navigation */}
-                <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-100 flex justify-around items-center py-3 pb-6 z-20">
+                <nav className="fixed bottom-0 w-full max-w-md bg-white border-t border-gray-100 grid grid-cols-4 items-center py-3 pb-6 z-20">
                     <Link to="/" className={`flex flex-col items-center gap-1 ${isActive('/') ? 'text-postech-600' : 'text-gray-400'}`}>
                         <Home size={24} />
                         <span className="text-xs font-medium">Home</span>
                     </Link>
-                    <Link to="/send" className={`flex flex-col items-center gap-1 ${isActive('/send') ? 'text-postech-600' : 'text-gray-400'}`}>
-                        <Send size={24} />
-                        <span className="text-xs font-medium">Send</span>
-                    </Link>
-                    <Link to="/buy" className={`flex flex-col items-center gap-1 ${isActive('/buy') ? 'text-postech-600' : 'text-gray-400'}`}>
-                        <PlusCircle size={24} />
-                        <span className="text-xs font-medium">Buy</span>
-                    </Link>
-                    <Link to="/request" className={`flex flex-col items-center gap-1 ${isActive('/request') ? 'text-postech-600' : 'text-gray-400'}`}>
-                        <ArrowDownLeft size={24} />
-                        <span className="text-xs font-medium">Request</span>
+                    <Link to="/chats" className={`flex flex-col items-center gap-1 ${isActive('/chats') ? 'text-postech-600' : 'text-gray-400'}`}>
+                        <MessageCircle size={24} />
+                        <span className="text-xs font-medium">Chats</span>
                     </Link>
                     <Link to="/friends" className={`flex flex-col items-center gap-1 ${isActive('/friends') ? 'text-postech-600' : 'text-gray-400'}`}>
                         <Users size={24} />

@@ -10,7 +10,7 @@ import { MINT_ADDRESS, DEMO_TREASURY_SECRET } from '../utils/constants';
 import { ArrowLeft, Send as SendIcon, Loader2, User } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { db, auth } from '../utils/firebase';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc, query, where, collection, getDocs } from 'firebase/firestore';
 
 const Send = () => {
     const { connection } = useConnection();
@@ -50,6 +50,14 @@ const Send = () => {
     const handleSend = async (e) => {
         e.preventDefault();
         if (!publicKey || !selectedContact || !amount) return;
+
+        // Validation for Settlement
+        if (location.state?.settlementId && location.state?.amount) {
+            if (Number(amount) < Number(location.state.amount)) {
+                alert(`Please pay the full amount (${Number(location.state.amount).toLocaleString()} P) to complete the settlement.`);
+                return;
+            }
+        }
 
         setLoading(true);
         try {
@@ -104,7 +112,6 @@ const Send = () => {
             await connection.confirmTransaction(signature, 'confirmed');
 
             console.log('Transfer signature:', signature);
-            console.log('Transfer signature:', signature);
 
             // If this was a request payment, mark it as completed
             if (location.state?.requestId) {
@@ -117,8 +124,52 @@ const Send = () => {
                 }
             }
 
+            // If this was a settlement payment, update the settlement document
+            if (location.state?.settlementId) {
+                try {
+                    const settlementRef = doc(db, "settlements", location.state.settlementId);
+                    const settlementSnap = await getDoc(settlementRef);
+
+                    if (settlementSnap.exists()) {
+                        const data = settlementSnap.data();
+                        const updatedParticipants = data.participants.map(p => {
+                            if (p.uid === auth.currentUser.uid) {
+                                return { ...p, status: 'paid' };
+                            }
+                            return p;
+                        });
+
+                        await updateDoc(settlementRef, {
+                            participants: updatedParticipants
+                        });
+
+                        // Check if everyone has paid
+                        const allPaid = updatedParticipants.every(p => p.status === 'paid');
+                        if (allPaid) {
+                            // Find the chat linked to this settlement and mark as completed
+                            const q = query(collection(db, "chats"), where("settlementId", "==", location.state.settlementId));
+                            const chatDocs = await getDocs(q);
+                            const updatePromises = chatDocs.docs.map(d =>
+                                updateDoc(doc(db, "chats", d.id), {
+                                    status: 'completed'
+                                })
+                            );
+                            await Promise.all(updatePromises);
+                        }
+                    }
+                } catch (err) {
+                    console.error("Failed to update settlement status:", err);
+                }
+            }
+
             alert(`Sent ${Number(amount).toLocaleString()} POINT to ${selectedContact.name}!`);
-            navigate('/');
+
+            if (location.state?.returnToChat) {
+                navigate(-1);
+            } else {
+                navigate('/');
+            }
+
         } catch (error) {
             console.error('Error sending points:', error);
             alert('Transfer Failed: ' + error.message);
@@ -127,12 +178,20 @@ const Send = () => {
         }
     };
 
+    const handleBack = () => {
+        if (location.state?.returnToChat) {
+            navigate(-1);
+        } else {
+            navigate('/');
+        }
+    };
+
     return (
         <div className="p-4">
             <div className="flex items-center gap-4 mb-6">
-                <Link to="/" className="text-gray-500 hover:text-gray-800">
+                <button onClick={handleBack} className="text-gray-500 hover:text-gray-800">
                     <ArrowLeft size={24} />
-                </Link>
+                </button>
                 <h2 className="text-xl font-bold text-gray-800">Send POINT</h2>
             </div>
 

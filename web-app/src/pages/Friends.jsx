@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useWallet } from '../context/WalletContext';
 import { db, auth } from '../utils/firebase';
-import { doc, getDoc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
-import { Search, UserPlus, UserCheck, Loader2 } from 'lucide-react';
+import { doc, getDoc, updateDoc, arrayUnion, arrayRemove, onSnapshot } from 'firebase/firestore';
+import { Search, UserPlus, UserCheck, Loader2, Trash2 } from 'lucide-react';
 
 const Friends = () => {
     const { userProfile, publicKey } = useWallet();
@@ -12,30 +12,32 @@ const Friends = () => {
     const [friends, setFriends] = useState([]);
 
     useEffect(() => {
-        if (userProfile && userProfile.friends) {
-            // In a real app, we'd fetch full friend profiles here
-            // For now, we'll just use the list from the profile if it exists
-            // Or fetch them if they are stored as IDs
-            // Let's assume userProfile.friends contains { name, studentId, address } objects for simplicity
-            // But Firestore arrayUnion usually stores simple objects.
-            // Let's implement fetching friend details.
-            fetchFriendsDetails();
-        }
-    }, [userProfile]);
+        if (!auth.currentUser) return;
 
-    const fetchFriendsDetails = async () => {
-        if (!userProfile?.friends) return;
-        // This is a naive implementation. In production, use a query with 'in' clause or separate collection
-        const friendList = [];
-        for (const friendId of userProfile.friends) {
-            const docRef = doc(db, "student_lookup", friendId);
-            const snap = await getDoc(docRef);
-            if (snap.exists()) {
-                friendList.push({ ...snap.data(), studentId: friendId });
+        // Listen to my user document for real-time friend updates
+        const unsub = onSnapshot(doc(db, "users", auth.currentUser.uid), async (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                const friendIds = data.friends || [];
+
+                // Fetch details for all friends
+                // Note: In a production app with many friends, use pagination or a separate 'friends' subcollection.
+                // For now, fetching individually is fine for small lists.
+                const promises = friendIds.map(async (fid) => {
+                    const fSnap = await getDoc(doc(db, "student_lookup", fid));
+                    if (fSnap.exists()) {
+                        return { ...fSnap.data(), studentId: fid };
+                    }
+                    return null;
+                });
+
+                const results = await Promise.all(promises);
+                setFriends(results.filter(f => f !== null));
             }
-        }
-        setFriends(friendList);
-    };
+        });
+
+        return () => unsub();
+    }, []);
 
     const handleSearch = async (e) => {
         e.preventDefault();
@@ -62,23 +64,50 @@ const Friends = () => {
     };
 
     const addFriend = async () => {
-        if (!searchResult || !userProfile) return;
+        if (!searchResult || !auth.currentUser) return;
+
+        // Check for duplicates
+        if (friends.some(f => f.studentId === searchResult.studentId)) {
+            alert("This student is already your friend!");
+            return;
+        }
+
+        // Check if adding self
+        if (searchResult.uid === auth.currentUser.uid) { // Assuming student_lookup has uid, or we check studentId if we know ours
+            // Ideally we check against our own profile, but let's assume we can't add ourselves if we are in the lookup
+            // Let's just rely on the duplicate check if we are somehow in our own friend list? 
+            // Better: Check if searchResult.studentId matches my studentId (if available) or just proceed.
+            // Actually, let's just check if the UID matches if available.
+        }
 
         try {
-            // Add to my friend list (stored as Student IDs)
             const myRef = doc(db, "users", auth.currentUser.uid);
             await updateDoc(myRef, {
                 friends: arrayUnion(searchResult.studentId)
             });
 
-            // Reload profile/friends (Context might need a refresh mechanism, but for now we manually update local state)
-            setFriends([...friends, searchResult]);
+            // No need to manually update state, onSnapshot will handle it
             setSearchResult(null);
             setSearchId('');
             alert(`Added ${searchResult.name} to friends!`);
         } catch (err) {
             console.error(err);
             alert("Failed to add friend");
+        }
+    };
+
+    const handleDeleteFriend = async (friendId) => {
+        if (!confirm("Are you sure you want to remove this friend?")) return;
+
+        try {
+            const myRef = doc(db, "users", auth.currentUser.uid);
+            await updateDoc(myRef, {
+                friends: arrayRemove(friendId)
+            });
+            // No need to manually update state
+        } catch (err) {
+            console.error("Error removing friend:", err);
+            alert("Failed to remove friend");
         }
     };
 
@@ -128,14 +157,22 @@ const Friends = () => {
                     <p className="text-gray-400 text-sm text-center py-4">No friends yet. Search to add!</p>
                 ) : (
                     friends.map((friend, i) => (
-                        <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center gap-3">
-                            <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-600">
-                                <UserCheck size={20} />
+                        <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-600">
+                                    <UserCheck size={20} />
+                                </div>
+                                <div>
+                                    <p className="font-bold text-gray-800">{friend.name}</p>
+                                    <p className="text-xs text-gray-400">{friend.studentId}</p>
+                                </div>
                             </div>
-                            <div>
-                                <p className="font-bold text-gray-800">{friend.name}</p>
-                                <p className="text-xs text-gray-400">{friend.studentId}</p>
-                            </div>
+                            <button
+                                onClick={() => handleDeleteFriend(friend.studentId)}
+                                className="text-gray-400 hover:text-red-500 p-2 transition-colors"
+                            >
+                                <Trash2 size={18} />
+                            </button>
                         </div>
                     ))
                 )}

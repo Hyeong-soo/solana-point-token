@@ -6,7 +6,7 @@ import { MINT_ADDRESS, DEMO_TREASURY_SECRET } from '../utils/constants';
 
 import { Plus, Send, ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, AlertCircle, Calculator, CreditCard } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { db } from '../utils/firebase';
+import { db, auth } from '../utils/firebase';
 import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 
 const Dashboard = () => {
@@ -24,35 +24,73 @@ const Dashboard = () => {
 
     // Real Pending Requests from Firebase
     const [pendingRequests, setPendingRequests] = useState([]);
+    const [pendingSettlements, setPendingSettlements] = useState([]);
 
     // Treasury Address for identifying "Buy" transactions
     const TREASURY_KEYPAIR = Keypair.fromSecretKey(DEMO_TREASURY_SECRET);
     const TREASURY_ADDRESS = TREASURY_KEYPAIR.publicKey.toBase58();
 
-    // Listen for pending requests
+    // Listen for pending requests & settlements
     useEffect(() => {
         if (!publicKey) return;
 
-        const q = query(
+        // 1. Direct Requests
+        const qRequests = query(
             collection(db, "requests"),
             where("to", "==", publicKey.toBase58()),
             where("status", "==", "pending")
         );
 
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        const unsubRequests = onSnapshot(qRequests, (snapshot) => {
             const requests = [];
             snapshot.forEach((doc) => {
                 requests.push({ id: doc.id, ...doc.data() });
             });
             setPendingRequests(requests);
         }, (error) => {
-            console.error("Firestore Error:", error);
-            if (error.code === 'permission-denied') {
-                alert("Firestore Permission Denied. Please check your Firestore Rules in Firebase Console (set to Test Mode).");
-            }
+            console.error("Firestore Error (Requests):", error);
         });
 
-        return () => unsubscribe();
+        // 2. Settlements (via Chats)
+        // Query chats where I am a participant
+        const qChats = query(
+            collection(db, "chats"),
+            where("participants", "array-contains", auth.currentUser.uid),
+            where("status", "==", "active") // Only check active chats
+        );
+
+        const unsubChats = onSnapshot(qChats, async (snapshot) => {
+            const settlements = [];
+            for (const chatDoc of snapshot.docs) {
+                const chatData = chatDoc.data();
+                if (chatData.settlementId) {
+                    try {
+                        const settlementDoc = await getDocs(query(collection(db, "settlements"), where("__name__", "==", chatData.settlementId)));
+                        if (!settlementDoc.empty) {
+                            const settlementData = settlementDoc.docs[0].data();
+                            const myParticipant = settlementData.participants.find(p => p.uid === auth.currentUser.uid);
+
+                            if (myParticipant && myParticipant.status === 'pending') {
+                                settlements.push({
+                                    chatId: chatDoc.id,
+                                    chatTitle: chatData.title,
+                                    myAmount: myParticipant.amount,
+                                    settlementId: chatData.settlementId
+                                });
+                            }
+                        }
+                    } catch (err) {
+                        console.error("Error fetching settlement:", err);
+                    }
+                }
+            }
+            setPendingSettlements(settlements);
+        });
+
+        return () => {
+            unsubRequests();
+            unsubChats();
+        };
     }, [publicKey]);
 
     const fetchData = useCallback(async () => {
@@ -339,13 +377,14 @@ const Dashboard = () => {
                 </Link>
             </div>
 
-            {/* Pending Requests */}
-            {pendingRequests.length > 0 && (
+            {/* Pending Requests & Settlements */}
+            {(pendingRequests.length > 0 || pendingSettlements.length > 0) && (
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-3">Pending Requests</h3>
+                    <h3 className="text-lg font-bold text-gray-800 mb-3">Pending</h3>
                     <div className="space-y-3">
+                        {/* Direct Requests */}
                         {pendingRequests.map((req, i) => (
-                            <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
+                            <div key={`req-${i}`} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
                                     <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-600">
                                         <ArrowDownLeft size={20} />
@@ -358,7 +397,6 @@ const Dashboard = () => {
                                 <div className="flex items-center gap-3">
                                     <span className="font-bold text-gray-800">{req.amount.toLocaleString()} P</span>
                                     <button
-
                                         onClick={() => navigate('/send', {
                                             state: {
                                                 contact: { name: req.fromName || 'Unknown', address: req.from },
@@ -369,6 +407,30 @@ const Dashboard = () => {
                                         className="bg-postech-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-postech-700 transition-colors"
                                     >
                                         Pay
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+
+                        {/* Pending Settlements */}
+                        {pendingSettlements.map((item, i) => (
+                            <div key={`set-${i}`} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-600">
+                                        <Calculator size={20} />
+                                    </div>
+                                    <div>
+                                        <p className="font-medium text-gray-800">{item.chatTitle}</p>
+                                        <p className="text-xs text-gray-400">Settlement</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <span className="font-bold text-gray-800">{item.myAmount.toLocaleString()} P</span>
+                                    <button
+                                        onClick={() => navigate(`/chats/${item.chatId}`)}
+                                        className="bg-gray-800 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-gray-900 transition-colors"
+                                    >
+                                        Chat
                                     </button>
                                 </div>
                             </div>

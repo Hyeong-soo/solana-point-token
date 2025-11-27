@@ -10,6 +10,8 @@ import Request from './pages/Request';
 import Friends from './pages/Friends';
 import Profile from './pages/Profile';
 import Split from './pages/Split';
+import ChatList from './pages/ChatList';
+import ChatRoom from './pages/ChatRoom';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Layout from './components/Layout';
@@ -31,6 +33,8 @@ function App() {
             <Route path="/friends" element={<Friends />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/split" element={<Split />} />
+            <Route path="/chats" element={<ChatList />} />
+            <Route path="/chats/:chatId" element={<ChatRoom />} />
           </Route>
         </Routes>
       </Router>
