@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowLeft, Loader2, User } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
-import { MOCK_CONTACTS } from '../utils/constants';
+
 import { db, auth } from '../utils/firebase';
 import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { useWallet } from '../context/WalletContext';

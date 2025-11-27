@@ -6,7 +6,7 @@ import {
     getAssociatedTokenAddress,
     createAssociatedTokenAccountIdempotentInstruction
 } from '@solana/spl-token';
-import { MINT_ADDRESS, MOCK_CONTACTS, DEMO_TREASURY_SECRET } from '../utils/constants';
+import { MINT_ADDRESS, DEMO_TREASURY_SECRET } from '../utils/constants';
 import { ArrowLeft, Send as SendIcon, Loader2, User } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { db, auth } from '../utils/firebase';

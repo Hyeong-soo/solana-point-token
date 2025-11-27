@@ -1,13 +1,13 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useConnection, useWallet } from '../context/WalletContext';
 import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
-import { PublicKey } from '@solana/web3.js';
-import { MINT_ADDRESS } from '../utils/constants';
+import { PublicKey, Keypair } from '@solana/web3.js';
+import { MINT_ADDRESS, DEMO_TREASURY_SECRET } from '../utils/constants';
 
-import { Plus, Send, ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, AlertCircle, Calculator } from 'lucide-react';
+import { Plus, Send, ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, AlertCircle, Calculator, CreditCard } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { db } from '../utils/firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
 
 const Dashboard = () => {
     const { connection } = useConnection();
@@ -24,6 +24,10 @@ const Dashboard = () => {
 
     // Real Pending Requests from Firebase
     const [pendingRequests, setPendingRequests] = useState([]);
+
+    // Treasury Address for identifying "Buy" transactions
+    const TREASURY_KEYPAIR = Keypair.fromSecretKey(DEMO_TREASURY_SECRET);
+    const TREASURY_ADDRESS = TREASURY_KEYPAIR.publicKey.toBase58();
 
     // Listen for pending requests
     useEffect(() => {
@@ -71,24 +75,34 @@ const Dashboard = () => {
             }
 
             // 2. Fetch History
-            // Fetch 5 signatures
-            const signatures = await connection.getSignaturesForAddress(
-                publicKey,
-                { limit: 5 },
-                'confirmed'
-            );
+            // We need to fetch signatures for BOTH the User's Wallet AND the User's ATA.
+            // "Buy" transactions (Treasury -> UserATA) only reference the ATA, not the Wallet.
 
-            if (signatures.length > 0) {
-                const parsedHistory = [];
+            const [walletSignatures, ataSignatures] = await Promise.all([
+                connection.getSignaturesForAddress(publicKey, { limit: 5 }, 'confirmed'),
+                connection.getSignaturesForAddress(userTokenAddress, { limit: 5 }, 'confirmed')
+            ]);
+
+            // Merge and Deduplicate
+            const allSignatures = [...walletSignatures, ...ataSignatures];
+            const uniqueSignaturesMap = new Map();
+            allSignatures.forEach(sig => {
+                uniqueSignaturesMap.set(sig.signature, sig);
+            });
+
+            // Sort by blockTime desc
+            const sortedSignatures = Array.from(uniqueSignaturesMap.values())
+                .sort((a, b) => (b.blockTime || 0) - (a.blockTime || 0))
+                .slice(0, 5);
+
+            if (sortedSignatures.length > 0) {
+                const tempHistory = [];
+                const otherPartyAddresses = new Set();
 
                 // SEQUENTIAL FETCHING (Required for Public Devnet to avoid 429)
-                // Batch fetching (getParsedTransactions) fails consistently on public nodes.
-                for (let i = 0; i < signatures.length; i++) {
-                    const sig = signatures[i];
+                for (let i = 0; i < sortedSignatures.length; i++) {
+                    const sig = sortedSignatures[i];
                     try {
-                        // 500ms delay removed for production speed
-                        // if (i > 0) await new Promise(resolve => setTimeout(resolve, 500));
-
                         const tx = await connection.getParsedTransaction(
                             sig.signature,
                             { maxSupportedTransactionVersion: 0, commitment: 'confirmed' }
@@ -98,11 +112,14 @@ const Dashboard = () => {
 
                         const mintAddressString = MINT_ADDRESS.toBase58();
                         const signature = sig.signature;
-                        const date = new Date(tx.blockTime * 1000).toLocaleDateString();
+                        // Format date to include time (e.g., 2023. 11. 27. 14:30)
+                        const dateObj = new Date(tx.blockTime * 1000);
+                        const date = dateObj.toLocaleDateString() + ' ' + dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
                         let type = 'Unknown';
                         let amount = 0;
                         let isOutgoing = false;
+                        let otherParty = null;
 
                         const preBalance = tx.meta.preTokenBalances?.find(b => b.mint === mintAddressString && b.owner === publicKey.toBase58());
                         const postBalance = tx.meta.postTokenBalances?.find(b => b.mint === mintAddressString && b.owner === publicKey.toBase58());
@@ -112,25 +129,82 @@ const Dashboard = () => {
                         const diff = post - pre;
 
                         if (diff > 0) {
-                            type = 'Received';
+                            // Received
                             amount = diff / 100;
                             isOutgoing = false;
+
+                            let senderOwner = null;
+
+                            // Strategy 1: Instruction Parsing (Prioritized)
+                            // The authority of the transfer instruction is definitively the sender.
+                            const instructions = tx.transaction.message.instructions;
+                            for (const ix of instructions) {
+                                if (ix.program === 'spl-token' && (ix.parsed?.type === 'transfer' || ix.parsed?.type === 'transferChecked')) {
+                                    senderOwner = ix.parsed.info.authority;
+                                    break;
+                                }
+                            }
+
+                            // Strategy 2: Find who lost money (Balance Change) - Fallback
+                            if (!senderOwner && tx.meta.preTokenBalances) {
+                                // Helper to find balance change for an account index
+                                const getBalanceChange = (index) => {
+                                    const pre = tx.meta.preTokenBalances?.find(b => b.accountIndex === index);
+                                    const post = tx.meta.postTokenBalances?.find(b => b.accountIndex === index);
+                                    if (!pre || !post) return 0;
+                                    return Number(post.uiTokenAmount.amount) - Number(pre.uiTokenAmount.amount);
+                                };
+
+                                for (const pre of tx.meta.preTokenBalances) {
+                                    if (pre.mint === mintAddressString) {
+                                        const change = getBalanceChange(pre.accountIndex);
+                                        if (change < 0) {
+                                            senderOwner = pre.owner;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Known Treasury Addresses
+                            const KNOWN_TREASURY_ADDRESSES = [
+                                TREASURY_ADDRESS
+                            ];
+
+                            if (KNOWN_TREASURY_ADDRESSES.includes(senderOwner)) {
+                                type = 'Buy';
+                            } else {
+                                type = 'Received';
+                                otherParty = senderOwner;
+                            }
                         } else if (diff < 0) {
-                            type = 'Sent';
+                            // Sent
                             amount = Math.abs(diff) / 100;
                             isOutgoing = true;
+                            type = 'Sent';
+
+                            // Find recipient
+                            const recipientBalance = tx.meta.postTokenBalances?.find(b => b.mint === mintAddressString && b.owner !== publicKey.toBase58());
+                            if (recipientBalance) {
+                                otherParty = recipientBalance.owner;
+                            }
                         } else {
                             type = 'Interaction';
                             amount = 0;
                             isOutgoing = true;
                         }
 
-                        parsedHistory.push({
+                        if (otherParty) {
+                            otherPartyAddresses.add(otherParty);
+                        }
+
+                        tempHistory.push({
                             signature,
                             date,
                             type,
                             amount,
-                            isOutgoing
+                            isOutgoing,
+                            otherParty
                         });
 
                     } catch (innerErr) {
@@ -138,7 +212,54 @@ const Dashboard = () => {
                     }
                 }
 
-                setHistory(parsedHistory);
+                // Batch fetch names for other parties
+                const addressToNameMap = {};
+                if (otherPartyAddresses.size > 0) {
+                    try {
+                        const addresses = Array.from(otherPartyAddresses);
+                        // Firestore 'in' query supports up to 10
+                        const chunks = [];
+                        for (let i = 0; i < addresses.length; i += 10) {
+                            chunks.push(addresses.slice(i, i + 10));
+                        }
+
+                        for (const chunk of chunks) {
+                            const q = query(collection(db, "users"), where("walletAddress", "in", chunk));
+                            const querySnapshot = await getDocs(q);
+                            querySnapshot.forEach((doc) => {
+                                const data = doc.data();
+                                addressToNameMap[data.walletAddress] = data.name;
+                            });
+                        }
+                    } catch (err) {
+                        console.error("Error fetching user names:", err);
+                    }
+                }
+
+                // Finalize history with names
+                const finalHistory = tempHistory.map(item => {
+                    let displayType = item.type;
+                    let description = item.date;
+
+                    if (item.type === 'Buy') {
+                        displayType = 'Buy POINT';
+                        description = `Charged • ${item.date}`;
+                    } else if (item.type === 'Sent') {
+                        const name = addressToNameMap[item.otherParty] || (item.otherParty ? `${item.otherParty.slice(0, 4)}...${item.otherParty.slice(-4)}` : 'Unknown');
+                        displayType = `To ${name}`;
+                    } else if (item.type === 'Received') {
+                        const name = addressToNameMap[item.otherParty] || (item.otherParty ? `${item.otherParty.slice(0, 4)}...${item.otherParty.slice(-4)}` : 'Unknown');
+                        displayType = `From ${name}`;
+                    }
+
+                    return {
+                        ...item,
+                        displayType,
+                        description
+                    };
+                });
+
+                setHistory(finalHistory);
             } else {
                 setHistory([]);
             }
@@ -280,12 +401,12 @@ const Dashboard = () => {
                         history.map((tx, i) => (
                             <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${tx.isOutgoing ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-600'}`}>
-                                        {tx.isOutgoing ? <ArrowUpRight size={20} /> : <ArrowDownLeft size={20} />}
+                                    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${tx.type === 'Buy' ? 'bg-blue-100 text-blue-600' : (tx.isOutgoing ? 'bg-gray-100 text-gray-600' : 'bg-green-100 text-green-600')}`}>
+                                        {tx.type === 'Buy' ? <CreditCard size={20} /> : (tx.isOutgoing ? <ArrowUpRight size={20} /> : <ArrowDownLeft size={20} />)}
                                     </div>
                                     <div>
-                                        <p className="font-bold text-gray-800">{tx.type}</p>
-                                        <p className="text-xs text-gray-400">{tx.date}</p>
+                                        <p className="font-bold text-gray-800">{tx.displayType}</p>
+                                        <p className="text-xs text-gray-400">{tx.description}</p>
                                     </div>
                                 </div>
                                 <span className={`font-bold ${tx.isOutgoing ? 'text-gray-800' : 'text-green-600'}`}>

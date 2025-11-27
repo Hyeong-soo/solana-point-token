@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { auth } from '../utils/firebase';
+import { useWallet } from '../context/WalletContext';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { Loader2, GraduationCap } from 'lucide-react';
 
@@ -20,6 +21,14 @@ const Login = () => {
         });
     };
 
+    const { connected } = useWallet(); // Import useWallet
+
+    React.useEffect(() => {
+        if (connected) {
+            navigate('/');
+        }
+    }, [connected, navigate]);
+
     const handleLogin = async (e) => {
         e.preventDefault();
         setLoading(true);
@@ -29,12 +38,11 @@ const Login = () => {
             // Map Student ID to dummy email
             const email = `${formData.studentId}@point.app`;
             await signInWithEmailAndPassword(auth, email, formData.password);
-            navigate('/');
+            // Do NOT setLoading(false) here. Keep it loading until redirect.
         } catch (err) {
             console.error("Login failed:", err);
             setError("Invalid Student ID or Password");
-        } finally {
-            setLoading(false);
+            setLoading(false); // Only stop loading on error
         }
     };
 
@@ -87,7 +95,7 @@ const Login = () => {
                         disabled={loading}
                         className="w-full bg-postech-600 text-white py-4 rounded-xl font-bold text-lg hover:bg-postech-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 mt-4 shadow-lg shadow-postech-200"
                     >
-                        {loading ? <Loader2 className="animate-spin" /> : 'Log In'}
+                        {loading ? <Loader2 className="animate-spin" /> : (connected ? <Loader2 className="animate-spin" /> : 'Log In')}
                     </button>
                 </form>
 

@@ -22,6 +22,11 @@ A blockchain-based campus currency system built on **Solana**, designed for a se
 - **Design**: Customized with POSTECH's official brand colors (Red `#A61955`, Orange `#F6A700`).
 - **UX**: Modern, mobile-friendly interface.
 
+### 5. Credit Card Payment (Simulation)
+- **Mock Payment**: Simulates a Stripe-like credit card payment flow.
+- **UI**: Includes card input form with validation and processing animations.
+- **Demo**: Allows users to experience the "Buy POINT" flow without real transactions.
+
 ---
 
 ## 🛠️ Tech Stack
