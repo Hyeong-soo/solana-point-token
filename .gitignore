@@ -29,6 +29,7 @@ receiver_wallet.json
 friends/
 *.key
 id.json
+mint.txt
 
 # IDEs
 .vscode/

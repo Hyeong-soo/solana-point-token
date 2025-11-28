@@ -1,0 +1,23 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper to check auth
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Chat Images:
+    // Allow authenticated users to upload and view images.
+    // (For stricter control, you would need to cross-reference Firestore, 
+    // but this is a good baseline for preventing public abuse).
+    match /chat_images/{chatId}/{allPaths=**} {
+      allow read, write: if isAuthenticated();
+    }
+
+    // Default deny for everything else
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

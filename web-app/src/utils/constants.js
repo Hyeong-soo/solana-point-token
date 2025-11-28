@@ -1,7 +1,6 @@
 import { PublicKey } from '@solana/web3.js';
 
-export const MINT_ADDRESS = new PublicKey('BuV4gcuXRVGKewkytasvGjhu6YBzuajMFUBDNs7hVM9z');
+export const MINT_ADDRESS = new PublicKey('J5XP5sKYZMVkSVRWY3HdBL2NrMycTqgxXgCuGJ3x3oe4');
 
-// DEMO ONLY: Treasury Secret Key to allow minting from frontend
-// In a real app, this would be on a secure backend.
-export const DEMO_TREASURY_SECRET = new Uint8Array(JSON.parse(import.meta.env.VITE_TREASURY_SECRET));
+// Treasury Public Address (Safe to expose)
+export const TREASURY_ADDRESS = new PublicKey('4SAXqtmKJ8i66uo2tubUcLiapTmcSCfmZtcZBRgwfhci');

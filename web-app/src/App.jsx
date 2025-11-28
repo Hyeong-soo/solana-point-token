@@ -17,6 +17,10 @@ import Register from './pages/Register';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 
+import AdminLayout from './components/AdminLayout';
+import AdminRoute from './components/AdminRoute';
+import AdminDashboard from './pages/AdminDashboard';
+
 function App() {
   return (
     <WalletProvider>
@@ -24,17 +28,21 @@ function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
-
           <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/buy" element={<Buy />} />
             <Route path="/send" element={<Send />} />
-            <Route path="/request" element={<Request />} />
-            <Route path="/friends" element={<Friends />} />
-            <Route path="/profile" element={<Profile />} />
             <Route path="/split" element={<Split />} />
+            <Route path="/friends" element={<Friends />} />
             <Route path="/chats" element={<ChatList />} />
-            <Route path="/chats/:chatId" element={<ChatRoom />} />
+            <Route path="/chats/:roomId" element={<ChatRoom />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/request" element={<Request />} />
+          </Route>
+
+          {/* Admin Routes */}
+          <Route element={<AdminRoute><AdminLayout /></AdminRoute>}>
+            <Route path="/admin" element={<AdminDashboard />} />
           </Route>
         </Routes>
       </Router>
@@ -43,4 +51,3 @@ function App() {
 }
 
 export default App;
-

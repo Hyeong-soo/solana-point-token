@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
 import { db, auth, storage } from '../utils/firebase';
 import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -7,7 +7,7 @@ import { ArrowLeft, Send, Image as ImageIcon, Loader2, X } from 'lucide-react';
 import SettlementStatus from '../components/SettlementStatus';
 
 const ChatRoom = () => {
-    const { chatId } = useParams();
+    const { roomId: chatId } = useParams();
     const navigate = useNavigate();
     const [messages, setMessages] = useState([]);
     const [newMessage, setNewMessage] = useState('');
@@ -33,16 +33,15 @@ const ChatRoom = () => {
         fetchUserName();
     }, [currentUser]);
 
-    // Fetch Chat Info
+    // Listen for Chat Info (Real-time)
     useEffect(() => {
-        const fetchChatInfo = async () => {
-            const docRef = doc(db, "chats", chatId);
-            const docSnap = await getDoc(docRef);
+        const docRef = doc(db, "chats", chatId);
+        const unsubscribe = onSnapshot(docRef, (docSnap) => {
             if (docSnap.exists()) {
                 setChatInfo(docSnap.data());
             }
-        };
-        fetchChatInfo();
+        });
+        return () => unsubscribe();
     }, [chatId]);
 
     // Listen for Messages
@@ -111,6 +110,16 @@ const ChatRoom = () => {
         }
     };
 
+    const location = useLocation();
+
+    const handleBack = () => {
+        if (location.state?.from === 'dashboard') {
+            navigate('/');
+        } else {
+            navigate('/chats');
+        }
+    };
+
     return (
         <div className="flex flex-col h-full relative -mx-4 -mt-4 -mb-4">
             {/* Image Modal */}
@@ -125,9 +134,9 @@ const ChatRoom = () => {
 
             {/* Header */}
             <div className="fixed top-[61px] left-1/2 -translate-x-1/2 w-full max-w-md bg-white p-4 shadow-sm flex items-center gap-4 z-40 border-b border-gray-100">
-                <Link to="/chats" className="text-gray-500 hover:text-gray-800">
+                <button onClick={handleBack} className="text-gray-500 hover:text-gray-800">
                     <ArrowLeft size={24} />
-                </Link>
+                </button>
                 <div>
                     <h2 className="font-bold text-gray-800">
                         {chatInfo ? chatInfo.title : 'Chat Room'}

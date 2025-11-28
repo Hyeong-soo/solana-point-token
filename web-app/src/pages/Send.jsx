@@ -6,7 +6,7 @@ import {
     getAssociatedTokenAddress,
     createAssociatedTokenAccountIdempotentInstruction
 } from '@solana/spl-token';
-import { MINT_ADDRESS, DEMO_TREASURY_SECRET } from '../utils/constants';
+import { MINT_ADDRESS, TREASURY_ADDRESS } from '../utils/constants';
 import { ArrowLeft, Send as SendIcon, Loader2, User } from 'lucide-react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { db, auth } from '../utils/firebase';
@@ -52,17 +52,37 @@ const Send = () => {
         if (!publicKey || !selectedContact || !amount) return;
 
         // Validation for Settlement
-        if (location.state?.settlementId && location.state?.amount) {
-            if (Number(amount) < Number(location.state.amount)) {
-                alert(`Please pay the full amount (${Number(location.state.amount).toLocaleString()} P) to complete the settlement.`);
+        // Validation for Settlement & Requests
+        if (location.state?.amount) {
+            const requiredAmount = Number(location.state.amount);
+            if (Number(amount) < requiredAmount) {
+                alert(`Please pay the full amount (${requiredAmount.toLocaleString()} P). Partial payments are not allowed for requests.`);
                 return;
             }
+        }
+
+        // Check User Balance
+        try {
+            const senderTokenAddress = await getAssociatedTokenAddress(MINT_ADDRESS, publicKey);
+            const tokenAccount = await connection.getTokenAccountBalance(senderTokenAddress);
+            const balance = tokenAccount.value.uiAmount;
+
+            if (balance < Number(amount)) {
+                alert(`Insufficient balance! You have ${balance} POINTs.`);
+                return;
+            }
+        } catch (error) {
+            console.error("Failed to check balance:", error);
+            // If account doesn't exist, balance is 0
+            alert("Insufficient balance! You have 0 POINTs.");
+            return;
         }
 
         setLoading(true);
         try {
             // DEMO ONLY: Use Treasury as Fee Payer (Gasless for User)
-            const treasuryKeypair = Keypair.fromSecretKey(DEMO_TREASURY_SECRET);
+            // const treasuryKeypair = Keypair.fromSecretKey(DEMO_TREASURY_SECRET); 
+            // We now use the backend relay for this.
 
             const transaction = new Transaction();
             const recipientPublicKey = new PublicKey(selectedContact.address);
@@ -73,12 +93,15 @@ const Send = () => {
 
             // 2. Add Instruction: Create Recipient ATA (Idempotent - succeeds if exists)
             // Payer is Treasury (Admin) so user doesn't need SOL for rent
+            // We use TREASURY_ADDRESS (Public Key) as the payer in the instruction
+            const TREASURY_PUBKEY = TREASURY_ADDRESS;
+
             transaction.add(
                 createAssociatedTokenAccountIdempotentInstruction(
-                    treasuryKeypair.publicKey, // Payer
-                    recipientTokenAddress,     // ATA
-                    recipientPublicKey,        // Owner
-                    MINT_ADDRESS               // Mint
+                    TREASURY_PUBKEY,       // Payer
+                    recipientTokenAddress, // ATA
+                    recipientPublicKey,    // Owner
+                    MINT_ADDRESS           // Mint
                 )
             );
 
@@ -94,7 +117,7 @@ const Send = () => {
             );
 
             // 4. Configure Transaction for Multi-sig (User + Treasury)
-            transaction.feePayer = treasuryKeypair.publicKey;
+            transaction.feePayer = TREASURY_PUBKEY;
             const { blockhash } = await connection.getLatestBlockhash();
             transaction.recentBlockhash = blockhash;
 
@@ -102,16 +125,20 @@ const Send = () => {
             if (!signTransaction) throw new Error('Wallet does not support transaction signing!');
             const signedTx = await signTransaction(transaction);
 
-            // 6. Treasury Signs (Fee Payer & Rent Payer)
-            signedTx.partialSign(treasuryKeypair);
+            // 6. Send to Backend Relay for Fee Payer Signature & Submission
+            const serializedTx = signedTx.serialize({ requireAllSignatures: false }).toString('base64');
 
-            // 7. Send Raw Transaction
-            const signature = await connection.sendRawTransaction(signedTx.serialize());
+            const response = await fetch('/api/relay', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ transaction: serializedTx })
+            });
 
-            // 8. Confirm
-            await connection.confirmTransaction(signature, 'confirmed');
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Relay failed');
 
-            console.log('Transfer signature:', signature);
+            const signature = data.signature;
+
 
             // If this was a request payment, mark it as completed
             if (location.state?.requestId) {
@@ -147,7 +174,12 @@ const Send = () => {
                         const allPaid = updatedParticipants.every(p => p.status === 'paid');
                         if (allPaid) {
                             // Find the chat linked to this settlement and mark as completed
-                            const q = query(collection(db, "chats"), where("settlementId", "==", location.state.settlementId));
+                            // [FIX] Must filter by participants to satisfy security rules ("Rules are not filters")
+                            const q = query(
+                                collection(db, "chats"),
+                                where("settlementId", "==", location.state.settlementId),
+                                where("participants", "array-contains", auth.currentUser.uid)
+                            );
                             const chatDocs = await getDocs(q);
                             const updatePromises = chatDocs.docs.map(d =>
                                 updateDoc(doc(db, "chats", d.id), {
@@ -172,7 +204,11 @@ const Send = () => {
 
         } catch (error) {
             console.error('Error sending points:', error);
-            alert('Transfer Failed: ' + error.message);
+            let msg = error.message;
+            if (msg.includes("insufficient funds") || msg.includes("0x1")) {
+                msg = "Insufficient funds to complete the transfer.";
+            }
+            alert('Transfer Failed: ' + msg);
         } finally {
             setLoading(false);
         }

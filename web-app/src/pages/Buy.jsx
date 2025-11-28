@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useConnection, useWallet } from '../context/WalletContext';
 import { Keypair, Transaction, sendAndConfirmTransaction } from '@solana/web3.js';
-import { createTransferInstruction, getOrCreateAssociatedTokenAccount } from '@solana/spl-token';
-import { MINT_ADDRESS, DEMO_TREASURY_SECRET } from '../utils/constants';
+import { createTransferInstruction, getOrCreateAssociatedTokenAccount, mintTo } from '@solana/spl-token';
+import { MINT_ADDRESS } from '../utils/constants';
 import { ArrowLeft, CreditCard, Loader2, Building2, Lock, Plus, Check } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { db, auth } from '../utils/firebase';
-import { collection, addDoc, getDocs, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, serverTimestamp, doc, updateDoc, increment, setDoc } from 'firebase/firestore';
 
 const Buy = () => {
     const { connection } = useConnection();
@@ -15,6 +15,29 @@ const Buy = () => {
     const [amount, setAmount] = useState('');
     const [loading, setLoading] = useState(false);
     const [paymentMethod, setPaymentMethod] = useState('account'); // 'account' | 'card'
+
+    // Exchange Rate State
+    const [exchangeRate, setExchangeRate] = useState(1400); // Default fallback
+    const [rateLoading, setRateLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchRate = async () => {
+            try {
+                const response = await fetch('https://api.exchangerate-api.com/v4/latest/USD');
+                const data = await response.json();
+                if (data && data.rates && data.rates.KRW) {
+                    setExchangeRate(data.rates.KRW);
+                }
+            } catch (error) {
+                console.error("Failed to fetch exchange rate, using fallback:", error);
+            } finally {
+                setRateLoading(false);
+            }
+        };
+        fetchRate();
+    }, []);
+
+    const usdAmount = amount ? (Number(amount) / exchangeRate).toFixed(2) : '0.00';
 
     // Card State
     const [savedCards, setSavedCards] = useState([]);
@@ -89,45 +112,60 @@ const Buy = () => {
                 }
             }
 
-            // DEMO ONLY: Load the Admin/Treasury Keypair
-            const adminKeypair = Keypair.fromSecretKey(DEMO_TREASURY_SECRET);
+            // 1. Call Backend API to Mint Tokens
+            const response = await fetch('/api/mint', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    userAddress: publicKey.toBase58(),
+                    amount: amount
+                }),
+            });
 
-            // 1. Get Admin's Token Account (Source)
-            const adminTokenAccount = await getOrCreateAssociatedTokenAccount(
-                connection,
-                adminKeypair, // Payer
-                MINT_ADDRESS,
-                adminKeypair.publicKey
-            );
+            const data = await response.json();
 
-            // 2. Get/Create User's Token Account (Destination)
-            const userTokenAccount = await getOrCreateAssociatedTokenAccount(
-                connection,
-                adminKeypair, // Payer (Admin pays for user's account creation in this demo)
-                MINT_ADDRESS,
-                publicKey
-            );
+            if (!response.ok) {
+                throw new Error(data.error || 'Minting failed');
+            }
 
-            // 3. Transfer Tokens from Admin to User
-            const transferAmount = BigInt(Math.floor(Number(amount) * 100));
+            const signature = data.signature;
 
-            const transaction = new Transaction().add(
-                createTransferInstruction(
-                    adminTokenAccount.address, // Source
-                    userTokenAccount.address,  // Destination
-                    adminKeypair.publicKey,    // Owner (Signer)
-                    transferAmount
-                )
-            );
 
-            // Sign and send (Admin signs)
-            const signature = await sendAndConfirmTransaction(
-                connection,
-                transaction,
-                [adminKeypair] // Signer
-            );
+            // 3. Update Admin Stats (Firebase)
+            const balanceField = paymentMethod === 'card' ? 'usd' : 'krw';
+            const balanceRef = doc(db, 'admin_stats', 'balances');
+            const incrementAmount = paymentMethod === 'card' ? Number(usdAmount) : Number(amount);
 
-            console.log('Transfer signature:', signature);
+            // Use setDoc with merge to ensure document exists, then update
+            // Note: increment works with setDoc({..}, {merge: true}) or updateDoc
+            // We'll try updateDoc first, if it fails (doc doesn't exist), we create it.
+            try {
+                await updateDoc(balanceRef, {
+                    [balanceField]: increment(incrementAmount)
+                });
+            } catch (err) {
+                // Document might not exist yet
+                await setDoc(balanceRef, {
+                    krw: paymentMethod === 'account' ? Number(amount) : 0,
+                    usd: paymentMethod === 'card' ? Number(usdAmount) : 0
+                }, { merge: true });
+            }
+
+            // 4. Record Transaction (Firebase)
+            await addDoc(collection(db, 'transactions'), {
+                userId: auth.currentUser ? auth.currentUser.uid : 'anonymous',
+                userEmail: auth.currentUser ? auth.currentUser.email : 'anonymous',
+                amount: Number(amount),
+                mintAmount: Number(amount), // 1:1 ratio for display
+                method: paymentMethod,
+                exchangeRate: paymentMethod === 'card' ? exchangeRate : null,
+                usdAmount: paymentMethod === 'card' ? Number(usdAmount) : null,
+                signature: signature,
+                createdAt: serverTimestamp()
+            });
+
             alert(`${Number(amount).toLocaleString()} POINT Purchased!`);
             navigate('/');
         } catch (error) {
@@ -303,7 +341,17 @@ const Buy = () => {
                         />
                         <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 font-medium">KRW</span>
                     </div>
-                    <p className="text-xs text-gray-400 mt-2">1 KRW = 1 POINT</p>
+                    <div className="text-xs text-gray-400 mt-2 flex justify-between items-center">
+                        <span>1 KRW = 1 POINT</span>
+                        {paymentMethod === 'card' && (
+                            <div className="text-right">
+                                <span className="block text-postech-600 font-bold">Approx. ${usdAmount} USD</span>
+                                <span className="text-[10px] text-gray-400">
+                                    {rateLoading ? 'Loading rate...' : `Rate: 1 USD = ${exchangeRate.toLocaleString()} KRW`}
+                                </span>
+                            </div>
+                        )}
+                    </div>
                 </div>
 
                 <button

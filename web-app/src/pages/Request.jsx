@@ -43,10 +43,10 @@ const Request = () => {
         if (!selectedContact || !amount) return;
 
         setLoading(true);
-        console.log("Starting request...");
+
 
         try {
-            console.log("Attempting to write to Firestore...");
+
 
             // Create a promise that rejects after 5 seconds
             const timeoutPromise = new Promise((_, reject) =>
@@ -74,8 +74,10 @@ const Request = () => {
 
             const addDocPromise = addDoc(collection(db, "requests"), {
                 from: senderAddress,
+                fromUid: auth.currentUser.uid, // [NEW] Store Sender UID
                 fromName: senderName,
                 to: selectedContact.address,
+                toUid: selectedContact.uid, // [NEW] Store Recipient UID
                 toName: selectedContact.name,
                 amount: Number(amount),
                 status: 'pending',
@@ -85,7 +87,7 @@ const Request = () => {
             // Race between addDoc and timeout
             await Promise.race([addDocPromise, timeoutPromise]);
 
-            console.log("Document written successfully!");
+
             alert(`Requested ${Number(amount).toLocaleString()} POINT from ${selectedContact.name}!`);
             navigate('/');
         } catch (error) {

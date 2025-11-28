@@ -2,12 +2,12 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useConnection, useWallet } from '../context/WalletContext';
 import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
 import { PublicKey, Keypair } from '@solana/web3.js';
-import { MINT_ADDRESS, DEMO_TREASURY_SECRET } from '../utils/constants';
+import { MINT_ADDRESS, TREASURY_ADDRESS } from '../utils/constants';
 
 import { Plus, Send, ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, AlertCircle, Calculator, CreditCard } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { db, auth } from '../utils/firebase';
-import { collection, query, where, onSnapshot, getDocs } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, orderBy, updateDoc, doc } from 'firebase/firestore';
 
 const Dashboard = () => {
     const { connection } = useConnection();
@@ -24,20 +24,18 @@ const Dashboard = () => {
 
     // Real Pending Requests from Firebase
     const [pendingRequests, setPendingRequests] = useState([]);
+    const [sentRequests, setSentRequests] = useState([]); // [NEW] Sent Requests
     const [pendingSettlements, setPendingSettlements] = useState([]);
-
-    // Treasury Address for identifying "Buy" transactions
-    const TREASURY_KEYPAIR = Keypair.fromSecretKey(DEMO_TREASURY_SECRET);
-    const TREASURY_ADDRESS = TREASURY_KEYPAIR.publicKey.toBase58();
+    const [activeSettlementChats, setActiveSettlementChats] = useState([]); // [NEW] Active Settlement Chats
 
     // Listen for pending requests & settlements
     useEffect(() => {
         if (!publicKey) return;
 
-        // 1. Direct Requests
+        // 1. Incoming Requests (To Me)
         const qRequests = query(
             collection(db, "requests"),
-            where("to", "==", publicKey.toBase58()),
+            where("toUid", "==", auth.currentUser.uid), // [FIX] Use UID
             where("status", "==", "pending")
         );
 
@@ -47,22 +45,42 @@ const Dashboard = () => {
                 requests.push({ id: doc.id, ...doc.data() });
             });
             setPendingRequests(requests);
-        }, (error) => {
-            console.error("Firestore Error (Requests):", error);
-        });
+        }, (error) => console.error("Firestore Error (Requests):", error));
 
-        // 2. Settlements (via Chats)
-        // Query chats where I am a participant
+        // 2. Outgoing Requests (From Me) [NEW]
+        const qSentRequests = query(
+            collection(db, "requests"),
+            where("fromUid", "==", auth.currentUser.uid) // [FIX] Use UID
+        );
+
+        const unsubSentRequests = onSnapshot(qSentRequests, (snapshot) => {
+            const requests = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                if (data.status !== 'archived') {
+                    requests.push({ id: doc.id, ...data });
+                }
+            });
+            // Client-side sort
+            requests.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+            setSentRequests(requests);
+        }, (error) => console.error("Firestore Error (Sent Requests):", error));
+
+        // 3. Settlements (via Chats)
         const qChats = query(
             collection(db, "chats"),
             where("participants", "array-contains", auth.currentUser.uid),
-            where("status", "==", "active") // Only check active chats
+            where("status", "==", "active")
         );
 
         const unsubChats = onSnapshot(qChats, async (snapshot) => {
             const settlements = [];
+            const activeChats = []; // [NEW]
+
             for (const chatDoc of snapshot.docs) {
                 const chatData = chatDoc.data();
+
+                // [NEW] Collect Active Settlement Chats
                 if (chatData.settlementId) {
                     try {
                         const settlementDoc = await getDocs(query(collection(db, "settlements"), where("__name__", "==", chatData.settlementId)));
@@ -70,6 +88,7 @@ const Dashboard = () => {
                             const settlementData = settlementDoc.docs[0].data();
                             const myParticipant = settlementData.participants.find(p => p.uid === auth.currentUser.uid);
 
+                            // 1. Pending Payment (I owe money)
                             if (myParticipant && myParticipant.status === 'pending') {
                                 settlements.push({
                                     chatId: chatDoc.id,
@@ -78,20 +97,61 @@ const Dashboard = () => {
                                     settlementId: chatData.settlementId
                                 });
                             }
+                            // 2. Active Settlement (I am the Creator)
+                            else if (settlementData.creatorId === auth.currentUser.uid) {
+                                activeChats.push({
+                                    id: chatDoc.id,
+                                    title: chatData.title,
+                                    settlementId: chatData.settlementId
+                                });
+                            }
+                            // 3. Paid Participant (Hide from Dashboard)
                         }
                     } catch (err) {
                         console.error("Error fetching settlement:", err);
                     }
                 }
             }
+            // Filter out active chats that are already in pending settlements (redundant check but safe)
+            const filteredActiveChats = activeChats.filter(chat =>
+                !settlements.some(s => s.settlementId === chat.settlementId)
+            );
+
             setPendingSettlements(settlements);
-        });
+            setActiveSettlementChats(filteredActiveChats);
+        }, (error) => console.error("Firestore Error (Chats):", error));
 
         return () => {
             unsubRequests();
+            unsubSentRequests();
             unsubChats();
         };
     }, [publicKey]);
+
+    // Helper to mark request as complete
+    const handleMarkComplete = async (requestId) => {
+        if (!window.confirm("Mark this request as completed?")) return;
+        try {
+            await updateDoc(doc(db, "requests", requestId), {
+                status: 'completed'
+            });
+        } catch (err) {
+            console.error("Failed to update request:", err);
+            alert("Failed to update status");
+        }
+    };
+
+    // Helper to archive request (hide from view)
+    const handleArchive = async (requestId) => {
+        try {
+            await updateDoc(doc(db, "requests", requestId), {
+                status: 'archived'
+            });
+        } catch (err) {
+            console.error("Failed to archive request:", err);
+            alert("Failed to archive");
+        }
+    };
 
     const fetchData = useCallback(async () => {
         if (!publicKey || isFetching.current) return;
@@ -177,9 +237,14 @@ const Dashboard = () => {
                             // The authority of the transfer instruction is definitively the sender.
                             const instructions = tx.transaction.message.instructions;
                             for (const ix of instructions) {
-                                if (ix.program === 'spl-token' && (ix.parsed?.type === 'transfer' || ix.parsed?.type === 'transferChecked')) {
-                                    senderOwner = ix.parsed.info.authority;
-                                    break;
+                                if (ix.program === 'spl-token') {
+                                    if (ix.parsed?.type === 'transfer' || ix.parsed?.type === 'transferChecked') {
+                                        senderOwner = ix.parsed.info.authority;
+                                        break;
+                                    } else if (ix.parsed?.type === 'mintTo') {
+                                        type = 'Buy';
+                                        break;
+                                    }
                                 }
                             }
 
@@ -209,7 +274,9 @@ const Dashboard = () => {
                                 TREASURY_ADDRESS
                             ];
 
-                            if (KNOWN_TREASURY_ADDRESSES.includes(senderOwner)) {
+                            if (type === 'Buy') {
+                                // Already identified as Buy via mintTo
+                            } else if (KNOWN_TREASURY_ADDRESSES.includes(senderOwner)) {
                                 type = 'Buy';
                             } else {
                                 type = 'Received';
@@ -380,7 +447,7 @@ const Dashboard = () => {
             {/* Pending Requests & Settlements */}
             {(pendingRequests.length > 0 || pendingSettlements.length > 0) && (
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-3">Pending</h3>
+                    <h3 className="text-lg font-bold text-gray-800 mb-3">Pending Payments</h3>
                     <div className="space-y-3">
                         {/* Direct Requests */}
                         {pendingRequests.map((req, i) => (
@@ -427,11 +494,82 @@ const Dashboard = () => {
                                 <div className="flex items-center gap-3">
                                     <span className="font-bold text-gray-800">{item.myAmount.toLocaleString()} P</span>
                                     <button
-                                        onClick={() => navigate(`/chats/${item.chatId}`)}
+                                        onClick={() => navigate(`/chats/${item.chatId}`, { state: { from: 'dashboard' } })}
                                         className="bg-gray-800 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-gray-900 transition-colors"
                                     >
                                         Chat
                                     </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* [NEW] Active Settlements (Quick Access) */}
+            {activeSettlementChats.length > 0 && (
+                <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-3">Active Settlements</h3>
+                    <div className="space-y-3">
+                        {activeSettlementChats.map((chat, i) => (
+                            <div key={`active-${i}`} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                                        <Calculator size={20} />
+                                    </div>
+                                    <div>
+                                        <p className="font-medium text-gray-800">{chat.title}</p>
+                                        <p className="text-xs text-gray-400">Ongoing</p>
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => navigate(`/chats/${chat.id}`, { state: { from: 'dashboard' } })}
+                                    className="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+                                >
+                                    Go
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* [NEW] Sent Requests */}
+            {sentRequests.length > 0 && (
+                <div>
+                    <h3 className="text-lg font-bold text-gray-800 mb-3">Sent Requests</h3>
+                    <div className="space-y-3">
+                        {sentRequests.map((req, i) => (
+                            <div key={`sent-${i}`} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                    <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center text-gray-600">
+                                        <ArrowUpRight size={20} />
+                                    </div>
+                                    <div>
+                                        <p className="font-medium text-gray-800">To {req.toName || 'Someone'}</p>
+                                        <p className={`text-xs ${req.status === 'completed' ? 'text-green-500 font-bold' : 'text-orange-500'}`}>
+                                            {req.status === 'completed' ? 'Completed' : 'Pending'}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <span className="font-bold text-gray-800">{req.amount.toLocaleString()} P</span>
+                                    {req.status === 'pending' && (
+                                        <button
+                                            onClick={() => handleMarkComplete(req.id)}
+                                            className="text-xs text-gray-400 underline hover:text-gray-600"
+                                        >
+                                            Mark Done
+                                        </button>
+                                    )}
+                                    {req.status === 'completed' && (
+                                        <button
+                                            onClick={() => handleArchive(req.id)}
+                                            className="bg-gray-100 text-gray-600 text-xs font-bold px-3 py-2 rounded-lg hover:bg-gray-200 transition-colors"
+                                        >
+                                            Confirm
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         ))}

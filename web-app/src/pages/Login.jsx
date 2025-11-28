@@ -35,6 +35,14 @@ const Login = () => {
         setError(null);
 
         try {
+            // Special Admin Login
+            if (formData.studentId === 'admin') {
+                const email = 'admin@point.app';
+                await signInWithEmailAndPassword(auth, email, formData.password);
+                navigate('/admin');
+                return;
+            }
+
             // Map Student ID to dummy email
             const email = `${formData.studentId}@point.app`;
             await signInWithEmailAndPassword(auth, email, formData.password);

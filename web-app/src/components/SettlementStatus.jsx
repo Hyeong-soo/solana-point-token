@@ -56,15 +56,55 @@ const SettlementStatus = ({ settlementId, chatId, chatStatus }) => {
     };
 
     const handleComplete = async () => {
-        if (!chatId) return;
+        if (!chatId || !settlementId) return;
+        if (!window.confirm("Mark settlement as completed? This will mark ALL participants as PAID.")) return;
+
         try {
+            // 1. Mark all participants as paid
+            const updatedParticipants = participants.map(p => ({ ...p, status: 'paid' }));
+
+            await updateDoc(doc(db, "settlements", settlementId), {
+                participants: updatedParticipants
+            });
+
+            // 2. Mark chat as completed
             await updateDoc(doc(db, "chats", chatId), {
                 status: 'completed'
             });
+
             alert("Settlement marked as completed!");
         } catch (err) {
             console.error("Error completing settlement:", err);
             alert("Failed to complete settlement");
+        }
+    };
+
+    const handleManualMarkPaid = async (participantUid) => {
+        if (!isCreator || !settlement) return;
+        if (!window.confirm("Mark this participant as PAID?")) return;
+
+        try {
+            const updatedParticipants = participants.map(p => {
+                if (p.uid === participantUid) {
+                    return { ...p, status: 'paid' };
+                }
+                return p;
+            });
+
+            await updateDoc(doc(db, "settlements", settlementId), {
+                participants: updatedParticipants
+            });
+
+            // Check if everyone has paid
+            const allPaid = updatedParticipants.every(p => p.status === 'paid');
+            if (allPaid && chatId) {
+                await updateDoc(doc(db, "chats", chatId), {
+                    status: 'completed'
+                });
+            }
+        } catch (err) {
+            console.error("Error updating status:", err);
+            alert("Failed to update status");
         }
     };
 
@@ -103,9 +143,19 @@ const SettlementStatus = ({ settlementId, chatId, chatStatus }) => {
                         <div className="flex items-center gap-2">
                             <span className="font-medium text-gray-700">{Number(p.amount).toLocaleString()} P</span>
                             {p.status === 'pending' && (
-                                <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                    <Clock size={10} /> Pending
-                                </span>
+                                <div className="flex items-center gap-2">
+                                    <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                        <Clock size={10} /> Pending
+                                    </span>
+                                    {isCreator && p.uid !== currentUser?.uid && (
+                                        <button
+                                            onClick={() => handleManualMarkPaid(p.uid)}
+                                            className="text-xs text-postech-600 font-bold hover:underline"
+                                        >
+                                            Mark Paid
+                                        </button>
+                                    )}
+                                </div>
                             )}
                         </div>
                     </div>

@@ -5,6 +5,7 @@ import { createUserWithEmailAndPassword } from 'firebase/auth';
 import { doc, setDoc } from 'firebase/firestore';
 import { Keypair } from '@solana/web3.js';
 import { Loader2, GraduationCap } from 'lucide-react';
+import { TREASURY_ADDRESS } from '../utils/constants';
 
 const Register = () => {
     const navigate = useNavigate();
@@ -31,13 +32,29 @@ const Register = () => {
 
         try {
             // 1. Generate Solana Wallet
-            const newKeypair = Keypair.generate();
-            const publicKey = newKeypair.publicKey.toBase58();
-            const secretKey = Array.from(newKeypair.secretKey); // Convert to array for storage
+            let publicKey;
+            let secretKey;
+
+            if (formData.studentId === 'admin') {
+                // Admin uses the Treasury Address (Public Key only)
+                // Private Key is NOT stored in Firestore/Frontend for security.
+                publicKey = TREASURY_ADDRESS.toBase58();
+                secretKey = []; // No secret key for admin in frontend
+            } else {
+                const newKeypair = Keypair.generate();
+                publicKey = newKeypair.publicKey.toBase58();
+                secretKey = Array.from(newKeypair.secretKey);
+            }
 
             // 2. Create Firebase Auth User
             // Map Student ID to a dummy email for Firebase Auth
-            const email = `${formData.studentId}@point.app`;
+            let email = `${formData.studentId}@point.app`;
+
+            // Special Admin Registration
+            if (formData.studentId === 'admin') {
+                email = 'admin@point.app';
+            }
+
             const userCredential = await createUserWithEmailAndPassword(auth, email, formData.password);
             const user = userCredential.user;
 

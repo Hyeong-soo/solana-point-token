@@ -34,7 +34,7 @@ const Friends = () => {
                 const results = await Promise.all(promises);
                 setFriends(results.filter(f => f !== null));
             }
-        });
+        }, (error) => console.error("Firestore Error (Friends):", error));
 
         return () => unsub();
     }, []);
@@ -42,6 +42,12 @@ const Friends = () => {
     const handleSearch = async (e) => {
         e.preventDefault();
         if (!searchId) return;
+
+        // Hide Admin from search
+        if (searchId.toLowerCase() === 'admin') {
+            alert("Student not found");
+            return;
+        }
 
         setLoading(true);
         setSearchResult(null);

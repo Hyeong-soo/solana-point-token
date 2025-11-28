@@ -16,6 +16,14 @@ export default defineConfig({
       },
     }),
   ],
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       '@solana/spl-token': path.resolve(__dirname, 'node_modules/@solana/spl-token/lib/cjs/index.js'),

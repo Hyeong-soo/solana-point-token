@@ -125,17 +125,20 @@ const Split = () => {
             });
 
             // 2. Create Settlement Document
+            const participantUids = participants.map(p => p.uid); // [NEW] Extract UIDs for security rules
+
             const settlementRef = await addDoc(collection(db, "settlements"), {
                 creatorId: auth.currentUser.uid,
                 totalAmount: Number(totalAmount),
                 participants: participants,
+                participantUids: participantUids, // [NEW] Store UIDs for security rules
                 createdAt: serverTimestamp(),
                 status: 'active'
             });
 
             // 3. Create Chat Document
             const chatTitle = chatName.trim() || `Split: ${Number(totalAmount).toLocaleString()} P`;
-            const participantUids = participants.map(p => p.uid);
+
 
             const chatRef = await addDoc(collection(db, "chats"), {
                 settlementId: settlementRef.id,
