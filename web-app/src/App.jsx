@@ -16,6 +16,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
+import Payment from './pages/Payment';
 
 import AdminLayout from './components/AdminLayout';
 import AdminRoute from './components/AdminRoute';
@@ -34,10 +35,11 @@ function App() {
             <Route path="/send" element={<Send />} />
             <Route path="/split" element={<Split />} />
             <Route path="/friends" element={<Friends />} />
-            <Route path="/chats" element={<ChatList />} />
-            <Route path="/chats/:roomId" element={<ChatRoom />} />
+            <Route path="/settlements" element={<ChatList />} />
+            <Route path="/settlements/:roomId" element={<ChatRoom />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/request" element={<Request />} />
+            <Route path="/payment" element={<Payment />} />
           </Route>
 
           {/* Admin Routes */}

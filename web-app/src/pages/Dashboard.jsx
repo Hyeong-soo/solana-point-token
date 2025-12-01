@@ -4,7 +4,7 @@ import { getAssociatedTokenAddress, getAccount } from '@solana/spl-token';
 import { PublicKey, Keypair } from '@solana/web3.js';
 import { MINT_ADDRESS, TREASURY_ADDRESS } from '../utils/constants';
 
-import { Plus, Send, ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, AlertCircle, Calculator, CreditCard } from 'lucide-react';
+import { Plus, Send, ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, AlertCircle, Calculator, CreditCard, ScanBarcode } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { db, auth } from '../utils/firebase';
 import { collection, query, where, onSnapshot, getDocs, orderBy, updateDoc, doc } from 'firebase/firestore';
@@ -414,9 +414,9 @@ const Dashboard = () => {
                             <Plus size={20} />
                             Buy
                         </Link>
-                        <Link to="/send" className="flex-1 bg-postech-500/30 backdrop-blur-md text-white py-3 rounded-xl font-bold text-center hover:bg-postech-500/40 transition-colors flex items-center justify-center gap-2 border border-white/10">
-                            <Send size={20} />
-                            Send
+                        <Link to="/payment" className="flex-1 bg-white text-postech-600 py-3 rounded-xl font-bold text-center hover:bg-postech-50 transition-colors flex items-center justify-center gap-2">
+                            <ScanBarcode size={20} />
+                            Payment
                         </Link>
                     </div>
                 </div>
@@ -494,7 +494,7 @@ const Dashboard = () => {
                                 <div className="flex items-center gap-3">
                                     <span className="font-bold text-gray-800">{item.myAmount.toLocaleString()} P</span>
                                     <button
-                                        onClick={() => navigate(`/chats/${item.chatId}`, { state: { from: 'dashboard' } })}
+                                        onClick={() => navigate(`/settlements/${item.chatId}`, { state: { from: 'dashboard' } })}
                                         className="bg-gray-800 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-gray-900 transition-colors"
                                     >
                                         Chat
@@ -523,7 +523,7 @@ const Dashboard = () => {
                                     </div>
                                 </div>
                                 <button
-                                    onClick={() => navigate(`/chats/${chat.id}`, { state: { from: 'dashboard' } })}
+                                    onClick={() => navigate(`/settlements/${chat.id}`, { state: { from: 'dashboard' } })}
                                     className="bg-blue-600 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors"
                                 >
                                     Go

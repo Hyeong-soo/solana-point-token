@@ -41,7 +41,7 @@ const ChatList = () => {
 
     return (
         <div className="p-4 pb-24">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">Chats</h2>
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">Settlements</h2>
 
             {/* Tabs */}
             <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
@@ -76,7 +76,7 @@ const ChatList = () => {
                     {filteredChats.map(chat => (
                         <Link
                             key={chat.id}
-                            to={`/chats/${chat.id}`}
+                            to={`/settlements/${chat.id}`}
                             className="block bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors"
                         >
                             <div className="flex items-center justify-between mb-2">

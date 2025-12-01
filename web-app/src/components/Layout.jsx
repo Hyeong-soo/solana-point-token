@@ -32,9 +32,9 @@ const Layout = ({ children }) => {
                         <Home size={24} />
                         <span className="text-xs font-medium">Home</span>
                     </Link>
-                    <Link to="/chats" className={`flex flex-col items-center gap-1 ${isActive('/chats') ? 'text-postech-600' : 'text-gray-400'}`}>
+                    <Link to="/settlements" className={`flex flex-col items-center gap-1 ${isActive('/settlements') ? 'text-postech-600' : 'text-gray-400'}`}>
                         <MessageCircle size={24} />
-                        <span className="text-xs font-medium">Chats</span>
+                        <span className="text-xs font-medium">Settlements</span>
                     </Link>
                     <Link to="/friends" className={`flex flex-col items-center gap-1 ${isActive('/friends') ? 'text-postech-600' : 'text-gray-400'}`}>
                         <Users size={24} />

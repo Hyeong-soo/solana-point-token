@@ -116,7 +116,7 @@ const ChatRoom = () => {
         if (location.state?.from === 'dashboard') {
             navigate('/');
         } else {
-            navigate('/chats');
+            navigate('/settlements');
         }
     };
 
