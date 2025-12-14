@@ -35,8 +35,9 @@ function App() {
             <Route path="/send" element={<Send />} />
             <Route path="/split" element={<Split />} />
             <Route path="/friends" element={<Friends />} />
-            <Route path="/settlements" element={<ChatList />} />
-            <Route path="/settlements/:roomId" element={<ChatRoom />} />
+            <Route path="/friends" element={<Friends />} />
+            <Route path="/chats" element={<ChatList />} />
+            <Route path="/chat/:roomId" element={<ChatRoom />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/request" element={<Request />} />
             <Route path="/payment" element={<Payment />} />

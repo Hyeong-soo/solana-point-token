@@ -164,7 +164,7 @@ const Split = () => {
             // Users should check the "Pending Settlements" or the Chat Room.
 
             alert(`Split created! Redirecting to chat...`);
-            navigate(`/settlements/${chatRef.id}`);
+            navigate(`/chat/${chatRef.id}`);
 
         } catch (error) {
             console.error("Error creating split:", error);

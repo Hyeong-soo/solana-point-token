@@ -7,7 +7,8 @@ import { MINT_ADDRESS, TREASURY_ADDRESS } from '../utils/constants';
 import { Plus, Send, ArrowDownLeft, ArrowUpRight, Loader2, RefreshCw, AlertCircle, Calculator, CreditCard, ScanBarcode } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { db, auth } from '../utils/firebase';
-import { collection, query, where, onSnapshot, getDocs, orderBy, updateDoc, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, getDocs, orderBy, updateDoc, doc, arrayUnion, getDoc } from 'firebase/firestore';
+import { isChatUnread } from '../utils/unreadUtils';
 
 const Dashboard = () => {
     const { connection } = useConnection();
@@ -15,6 +16,7 @@ const Dashboard = () => {
     const navigate = useNavigate();
     const [balance, setBalance] = useState(0);
     const [loading, setLoading] = useState(false);
+
     const [history, setHistory] = useState([]);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -94,7 +96,10 @@ const Dashboard = () => {
                                     chatId: chatDoc.id,
                                     chatTitle: chatData.title,
                                     myAmount: myParticipant.amount,
-                                    settlementId: chatData.settlementId
+                                    settlementId: chatData.settlementId,
+                                    lastMessageAt: chatData.lastMessageAt,
+                                    lastSenderId: chatData.lastSenderId, // [NEW] Needed for unread check
+                                    readStatus: chatData.readStatus // [NEW] Needed for unread check
                                 });
                             }
                             // 2. Active Settlement (I am the Creator)
@@ -102,7 +107,10 @@ const Dashboard = () => {
                                 activeChats.push({
                                     id: chatDoc.id,
                                     title: chatData.title,
-                                    settlementId: chatData.settlementId
+                                    settlementId: chatData.settlementId,
+                                    lastMessageAt: chatData.lastMessageAt,
+                                    lastSenderId: chatData.lastSenderId, // [NEW] Needed for unread check
+                                    readStatus: chatData.readStatus // [NEW] Needed for unread check
                                 });
                             }
                             // 3. Paid Participant (Hide from Dashboard)
@@ -150,6 +158,36 @@ const Dashboard = () => {
         } catch (err) {
             console.error("Failed to archive request:", err);
             alert("Failed to archive");
+        }
+    };
+
+    // Helper to add friend
+    const handleAddFriend = async (e, name, studentId) => {
+        e.stopPropagation(); // Prevent triggering parent click if any
+        if (!studentId || !auth.currentUser) return;
+
+        if (!window.confirm(`Add ${name} (${studentId}) as friend?`)) return;
+
+        try {
+            const myRef = doc(db, "users", auth.currentUser.uid);
+
+            // Check if already friends
+            const myDoc = await getDoc(myRef);
+            if (myDoc.exists()) {
+                const myData = myDoc.data();
+                if (myData.friends && myData.friends.includes(studentId)) {
+                    alert("This user is already your friend!");
+                    return;
+                }
+            }
+
+            await updateDoc(myRef, {
+                friends: arrayUnion(studentId)
+            });
+            alert(`Added ${name} to friends!`);
+        } catch (err) {
+            console.error("Failed to add friend:", err);
+            alert("Failed to add friend");
         }
     };
 
@@ -333,7 +371,7 @@ const Dashboard = () => {
                             const querySnapshot = await getDocs(q);
                             querySnapshot.forEach((doc) => {
                                 const data = doc.data();
-                                addressToNameMap[data.walletAddress] = data.name;
+                                addressToNameMap[data.walletAddress] = { name: data.name, studentId: data.studentId };
                             });
                         }
                     } catch (err) {
@@ -346,20 +384,29 @@ const Dashboard = () => {
                     let displayType = item.type;
                     let description = item.date;
 
+                    let otherPartyName = 'Unknown';
+                    let otherPartyStudentId = null;
+
                     if (item.type === 'Buy') {
                         displayType = 'Buy POINT';
                         description = `Charged • ${item.date}`;
                     } else if (item.type === 'Sent') {
-                        const name = addressToNameMap[item.otherParty] || (item.otherParty ? `${item.otherParty.slice(0, 4)}...${item.otherParty.slice(-4)}` : 'Unknown');
-                        displayType = `To ${name}`;
+                        const info = addressToNameMap[item.otherParty];
+                        otherPartyName = info?.name || (item.otherParty ? `${item.otherParty.slice(0, 4)}...${item.otherParty.slice(-4)}` : 'Unknown');
+                        otherPartyStudentId = info?.studentId;
+                        displayType = 'To ';
                     } else if (item.type === 'Received') {
-                        const name = addressToNameMap[item.otherParty] || (item.otherParty ? `${item.otherParty.slice(0, 4)}...${item.otherParty.slice(-4)}` : 'Unknown');
-                        displayType = `From ${name}`;
+                        const info = addressToNameMap[item.otherParty];
+                        otherPartyName = info?.name || (item.otherParty ? `${item.otherParty.slice(0, 4)}...${item.otherParty.slice(-4)}` : 'Unknown');
+                        otherPartyStudentId = info?.studentId;
+                        displayType = 'From ';
                     }
 
                     return {
                         ...item,
                         displayType,
+                        otherPartyName,
+                        otherPartyStudentId,
                         description
                     };
                 });
@@ -416,7 +463,7 @@ const Dashboard = () => {
                         </Link>
                         <Link to="/payment" className="flex-1 bg-white text-postech-600 py-3 rounded-xl font-bold text-center hover:bg-postech-50 transition-colors flex items-center justify-center gap-2">
                             <ScanBarcode size={20} />
-                            Payment
+                            My Code
                         </Link>
                     </div>
                 </div>
@@ -437,17 +484,17 @@ const Dashboard = () => {
                     <span className="font-medium text-gray-700 text-xs">Request</span>
                 </Link>
                 <Link to="/split" className="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col items-center justify-center gap-2 hover:bg-gray-50 transition-colors">
-                    <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-600">
+                    <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600">
                         <Calculator size={20} />
                     </div>
                     <span className="font-medium text-gray-700 text-xs">Split Bill</span>
                 </Link>
             </div>
 
-            {/* Pending Requests & Settlements */}
+            {/* Pending Requests & Chats */}
             {(pendingRequests.length > 0 || pendingSettlements.length > 0) && (
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-3">Pending Payments</h3>
+                    <h3 className="text-lg font-bold text-gray-800 mb-3">Pending Chats</h3>
                     <div className="space-y-3">
                         {/* Direct Requests */}
                         {pendingRequests.map((req, i) => (
@@ -483,18 +530,21 @@ const Dashboard = () => {
                         {pendingSettlements.map((item, i) => (
                             <div key={`set-${i}`} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center text-green-600">
+                                    <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 relative">
                                         <Calculator size={20} />
+                                        {isChatUnread(item, auth.currentUser?.uid) && (
+                                            <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>
+                                        )}
                                     </div>
                                     <div>
                                         <p className="font-medium text-gray-800">{item.chatTitle}</p>
-                                        <p className="text-xs text-gray-400">Settlement</p>
+                                        <p className="text-xs text-gray-400">Chat</p>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-3">
                                     <span className="font-bold text-gray-800">{item.myAmount.toLocaleString()} P</span>
                                     <button
-                                        onClick={() => navigate(`/settlements/${item.chatId}`, { state: { from: 'dashboard' } })}
+                                        onClick={() => navigate(`/chat/${item.chatId}`, { state: { from: 'dashboard' } })}
                                         className="bg-gray-800 text-white text-xs font-bold px-3 py-2 rounded-lg hover:bg-gray-900 transition-colors"
                                     >
                                         Chat
@@ -506,16 +556,19 @@ const Dashboard = () => {
                 </div>
             )}
 
-            {/* [NEW] Active Settlements (Quick Access) */}
+            {/* [NEW] Active Chats (Quick Access) */}
             {activeSettlementChats.length > 0 && (
                 <div>
-                    <h3 className="text-lg font-bold text-gray-800 mb-3">Active Settlements</h3>
+                    <h3 className="text-lg font-bold text-gray-800 mb-3">Active Chats</h3>
                     <div className="space-y-3">
                         {activeSettlementChats.map((chat, i) => (
                             <div key={`active-${i}`} className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 flex items-center justify-between">
                                 <div className="flex items-center gap-3">
-                                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                                    <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 relative">
                                         <Calculator size={20} />
+                                        {isChatUnread(chat, auth.currentUser?.uid) && (
+                                            <div className="absolute top-0 right-0 w-3 h-3 bg-red-500 rounded-full border-2 border-white"></div>
+                                        )}
                                     </div>
                                     <div>
                                         <p className="font-medium text-gray-800">{chat.title}</p>
@@ -605,7 +658,23 @@ const Dashboard = () => {
                                         {tx.type === 'Buy' ? <CreditCard size={20} /> : (tx.isOutgoing ? <ArrowUpRight size={20} /> : <ArrowDownLeft size={20} />)}
                                     </div>
                                     <div>
-                                        <p className="font-bold text-gray-800">{tx.displayType}</p>
+                                        <p className="font-bold text-gray-800">
+                                            {tx.type === 'Buy' ? tx.displayType : (
+                                                <span>
+                                                    {tx.displayType}
+                                                    {tx.otherPartyStudentId ? (
+                                                        <button
+                                                            onClick={(e) => handleAddFriend(e, tx.otherPartyName, tx.otherPartyStudentId)}
+                                                            className="hover:text-postech-600 hover:underline transition-colors"
+                                                        >
+                                                            {tx.otherPartyName}
+                                                        </button>
+                                                    ) : (
+                                                        tx.otherPartyName
+                                                    )}
+                                                </span>
+                                            )}
+                                        </p>
                                         <p className="text-xs text-gray-400">{tx.description}</p>
                                     </div>
                                 </div>

@@ -1,16 +1,23 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { db, auth } from '../utils/firebase';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import { MessageCircle, ArrowRight, CheckCircle } from 'lucide-react';
+import { isChatUnread } from '../utils/unreadUtils';
 
 const ChatList = () => {
     const [chats, setChats] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [tab, setTab] = useState('active'); // 'active' | 'completed'
+    const [loading, setLoading] = useState(true); // Added loading state
+    const [searchParams, setSearchParams] = useSearchParams();
+    const tab = searchParams.get('tab') || 'active'; // 'active' | 'completed'
+    const setTab = (newTab) => setSearchParams({ tab: newTab });
+
 
     useEffect(() => {
-        if (!auth.currentUser) return;
+        if (!auth.currentUser) {
+            setLoading(false); // Set loading to false if no user
+            return;
+        }
 
         // Query chats where current user is a participant
         const q = query(
@@ -41,7 +48,7 @@ const ChatList = () => {
 
     return (
         <div className="p-4 pb-24">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">Settlements</h2>
+            <h2 className="text-2xl font-bold text-gray-800 mb-6">Chats</h2>
 
             {/* Tabs */}
             <div className="flex p-1 bg-gray-100 rounded-xl mb-6">
@@ -76,8 +83,9 @@ const ChatList = () => {
                     {filteredChats.map(chat => (
                         <Link
                             key={chat.id}
-                            to={`/settlements/${chat.id}`}
-                            className="block bg-white p-4 rounded-xl shadow-sm border border-gray-100 hover:bg-gray-50 transition-colors"
+                            to={`/chat/${chat.id}`}
+                            state={{ tab: tab }} // Pass current tab to ChatRoom
+                            className="block bg-white rounded-xl p-4 shadow-sm border border-gray-100 hover:shadow-md transition-shadow"
                         >
                             <div className="flex items-center justify-between mb-2">
                                 <h3 className="font-bold text-gray-800 truncate">{chat.title}</h3>
@@ -86,10 +94,15 @@ const ChatList = () => {
                                 </span>
                             </div>
                             <div className="flex items-center justify-between">
-                                <p className="text-sm text-gray-500 truncate max-w-[200px]">
+                                <p className={`text-sm truncate max-w-[200px] ${isChatUnread(chat, auth.currentUser?.uid) ? 'font-bold text-gray-900' : 'text-gray-500'}`}>
                                     {chat.lastMessage || "No messages yet"}
                                 </p>
-                                <ArrowRight size={16} className="text-gray-300" />
+                                <div className="flex items-center gap-2">
+                                    {isChatUnread(chat, auth.currentUser?.uid) && (
+                                        <div className="w-2.5 h-2.5 bg-red-500 rounded-full"></div>
+                                    )}
+                                    <ArrowRight size={16} className="text-gray-300" />
+                                </div>
                             </div>
                         </Link>
                     ))}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useParams, useNavigate, Link, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { db, auth, storage } from '../utils/firebase';
-import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, addDoc, serverTimestamp, doc, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { ArrowLeft, Send, Image as ImageIcon, Loader2, X } from 'lucide-react';
 import SettlementStatus from '../components/SettlementStatus';
@@ -58,10 +58,20 @@ const ChatRoom = () => {
             }));
             setMessages(msgs);
             scrollToBottom();
+
+            // Find latest message timestamp
+            if (msgs.length > 0) {
+                // Update read status in Firestore
+                if (currentUser) {
+                    updateDoc(doc(db, "chats", chatId), {
+                        [`readStatus.${currentUser.uid}`]: serverTimestamp()
+                    }).catch(err => console.error("Failed to mark read:", err));
+                }
+            }
         });
 
         return () => unsubscribe();
-    }, [chatId]);
+    }, [chatId, currentUser]);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -72,13 +82,23 @@ const ChatRoom = () => {
         if ((!newMessage.trim() && !uploading) || !currentUser) return;
 
         try {
-            await addDoc(collection(db, "chats", chatId, "messages"), {
+            const batch = {
                 text: newMessage,
                 senderId: currentUser.uid,
                 senderName: senderName, // Use fetched name
                 createdAt: serverTimestamp(),
                 type: 'text'
+            };
+
+            await addDoc(collection(db, "chats", chatId, "messages"), batch);
+
+            // [NEW] Update Chat Document for immediate UI update
+            await updateDoc(doc(db, "chats", chatId), {
+                lastMessage: newMessage,
+                lastMessageAt: serverTimestamp(),
+                lastSenderId: currentUser.uid
             });
+
             setNewMessage('');
         } catch (error) {
             console.error("Error sending message:", error);
@@ -102,6 +122,14 @@ const ChatRoom = () => {
                 createdAt: serverTimestamp(),
                 type: 'image'
             });
+
+            // [NEW] Update Chat Document
+            await updateDoc(doc(db, "chats", chatId), {
+                lastMessage: "Sent an image",
+                lastMessageAt: serverTimestamp(),
+                lastSenderId: currentUser.uid
+            });
+
         } catch (error) {
             console.error("Error uploading image:", error);
             alert("Failed to upload image");
@@ -115,8 +143,52 @@ const ChatRoom = () => {
     const handleBack = () => {
         if (location.state?.from === 'dashboard') {
             navigate('/');
+        } else if (location.state?.tab) {
+            navigate(`/chats?tab=${location.state.tab}`);
         } else {
-            navigate('/settlements');
+            navigate('/chats');
+        }
+    };
+
+    const handleAddFriend = async (senderUid, senderName) => {
+        if (!currentUser || senderUid === currentUser.uid) return;
+
+        if (!window.confirm(`Add ${senderName} as friend?`)) return;
+
+        try {
+            // 1. Resolve UID to Student ID
+            const userSnap = await getDoc(doc(db, "users", senderUid));
+            if (!userSnap.exists()) {
+                alert("User not found");
+                return;
+            }
+            const studentId = userSnap.data().studentId;
+
+            if (!studentId) {
+                alert("Could not find Student ID for this user.");
+                return;
+            }
+
+            const myRef = doc(db, "users", currentUser.uid);
+
+            // 2. Check if already friends
+            const myDoc = await getDoc(myRef);
+            if (myDoc.exists()) {
+                const myData = myDoc.data();
+                if (myData.friends && myData.friends.includes(studentId)) {
+                    alert("This user is already your friend!");
+                    return;
+                }
+            }
+
+            // 3. Add Friend (Student ID)
+            await updateDoc(myRef, {
+                friends: arrayUnion(studentId)
+            });
+            alert(`Added ${senderName} to friends!`);
+        } catch (err) {
+            console.error("Failed to add friend:", err);
+            alert("Failed to add friend");
         }
     };
 
@@ -155,6 +227,7 @@ const ChatRoom = () => {
                         settlementId={chatInfo.settlementId}
                         chatId={chatId}
                         chatStatus={chatInfo.status}
+                        onAddFriend={handleAddFriend}
                     />
                 )}
 
@@ -175,7 +248,15 @@ const ChatRoom = () => {
                     return (
                         <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
                             <div className={`max-w-[70%] rounded-2xl p-3 ${isMe ? 'bg-postech-600 text-white rounded-tr-none' : 'bg-white text-gray-800 shadow-sm rounded-tl-none'}`}>
-                                {!isMe && <p className="text-xs font-bold mb-1 opacity-70">{msg.senderName}</p>}
+                                {!isMe && (
+                                    <p
+                                        className="text-xs font-bold mb-1 opacity-70 cursor-pointer hover:underline hover:text-postech-600 transition-colors"
+                                        onClick={() => handleAddFriend(msg.senderId, msg.senderName)}
+                                        title="Click to add friend"
+                                    >
+                                        {msg.senderName}
+                                    </p>
+                                )}
 
                                 {msg.type === 'image' ? (
                                     <img

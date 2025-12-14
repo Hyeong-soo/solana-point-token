@@ -4,7 +4,7 @@ import { db, auth } from '../utils/firebase';
 import { Check, Clock, User, ArrowRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-const SettlementStatus = ({ settlementId, chatId, chatStatus }) => {
+const SettlementStatus = ({ settlementId, chatId, chatStatus, onAddFriend }) => {
     const [settlement, setSettlement] = useState(null);
     const [loading, setLoading] = useState(true);
     const navigate = useNavigate();
@@ -136,7 +136,30 @@ const SettlementStatus = ({ settlementId, chatId, chatStatus }) => {
                             <div className={`w-6 h-6 rounded-full flex items-center justify-center ${p.status === 'paid' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
                                 {p.status === 'paid' ? <Check size={14} /> : <User size={14} />}
                             </div>
-                            <span className={p.status === 'paid' ? 'text-gray-800 font-medium' : 'text-gray-500'}>
+                            <span
+                                className={`${p.status === 'paid' ? 'text-gray-800 font-medium' : 'text-gray-500'} ${p.uid !== currentUser?.uid ? 'cursor-pointer hover:text-postech-600 hover:underline' : ''}`}
+                                onClick={() => {
+                                    if (p.uid !== currentUser?.uid && onAddFriend) {
+                                        // We don't have the studentId here directly in the participant object usually, 
+                                        // but let's check if we can use uid or if we need to fetch it.
+                                        // Wait, ChatRoom's handleAddFriend expects (senderId, senderName). 
+                                        // Here senderId usually refers to the studentId in other contexts, but let's check ChatRoom implementation.
+                                        // In ChatRoom, handleAddFriend uses arrayUnion(senderId). 
+                                        // In Dashboard, we add studentId to friends array.
+                                        // In ChatRoom messages, msg.senderId is likely the UID (from auth.currentUser.uid).
+                                        // Wait, let's verify what "senderId" is in ChatRoom messages.
+                                        // In ChatRoom: senderId: currentUser.uid. So it is the UID.
+                                        // But in Dashboard, we add `studentId` (which is the document ID of student_lookup? Or the user's UID?).
+                                        // Let's check Friends.jsx or Dashboard.jsx again.
+                                        // In Dashboard: `friends: arrayUnion(studentId)`. 
+                                        // And `studentId` comes from `req.from` or `item.lastSenderId`.
+                                        // In Split.jsx, we store `uid` in participants.
+                                        // So we should be consistent. If the friends array stores UIDs, then we pass p.uid.
+                                        // Let's assume it stores UIDs for now based on ChatRoom usage.
+                                        onAddFriend(p.uid, p.name);
+                                    }
+                                }}
+                            >
                                 {p.name} {p.uid === currentUser?.uid && "(You)"}
                             </span>
                         </div>

@@ -2,6 +2,10 @@ import React from 'react';
 import { Link, useLocation, Outlet } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import { Home, Send, PlusCircle, ArrowDownLeft, LogOut, Users, User, MessageCircle } from 'lucide-react';
+import { db, auth } from '../utils/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { isChatUnread } from '../utils/unreadUtils';
+import { useState, useEffect } from 'react';
 
 
 const Layout = ({ children }) => {
@@ -9,6 +13,30 @@ const Layout = ({ children }) => {
     const { disconnect, userProfile } = useWallet();
 
     const isActive = (path) => location.pathname === path;
+
+    const [unreadCount, setUnreadCount] = useState(0);
+
+    useEffect(() => {
+        if (!auth.currentUser) return;
+
+        const q = query(
+            collection(db, "chats"),
+            where("participants", "array-contains", auth.currentUser.uid)
+        );
+
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            let count = 0;
+            snapshot.forEach(doc => {
+                const chat = { id: doc.id, ...doc.data() };
+                if (isChatUnread(chat, auth.currentUser?.uid)) {
+                    count++;
+                }
+            });
+            setUnreadCount(count);
+        });
+
+        return () => unsubscribe();
+    }, [auth.currentUser]);
 
     return (
         <div className="min-h-screen bg-gray-50 text-gray-900 font-sans flex flex-col items-center">
@@ -32,9 +60,16 @@ const Layout = ({ children }) => {
                         <Home size={24} />
                         <span className="text-xs font-medium">Home</span>
                     </Link>
-                    <Link to="/settlements" className={`flex flex-col items-center gap-1 ${isActive('/settlements') ? 'text-postech-600' : 'text-gray-400'}`}>
-                        <MessageCircle size={24} />
-                        <span className="text-xs font-medium">Settlements</span>
+                    <Link to="/chats" className={`flex flex-col items-center gap-1 ${isActive('/chats') ? 'text-postech-600' : 'text-gray-400'} relative`}>
+                        <div className="relative">
+                            <MessageCircle size={24} />
+                            {unreadCount > 0 && (
+                                <div className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded-full border border-white">
+                                    {unreadCount > 9 ? '9+' : unreadCount}
+                                </div>
+                            )}
+                        </div>
+                        <span className="text-xs font-medium">Chats</span>
                     </Link>
                     <Link to="/friends" className={`flex flex-col items-center gap-1 ${isActive('/friends') ? 'text-postech-600' : 'text-gray-400'}`}>
                         <Users size={24} />
