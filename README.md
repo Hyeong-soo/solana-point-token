@@ -11,16 +11,18 @@ A blockchain-based campus currency system built on **Solana**, designed for a se
 
 ### 2. Friend System
 - **Search & Add**: Find friends by Student ID.
+- **Click to Add**: Easily add friends by clicking their name in Chats, Dashboard, or Settlement Status.
 - **Real-time Interaction**: Send POINTs to friends easily.
 
-### 3. Split Bill (Dutch Pay)
-- **N-bbang**: Select multiple friends to split a bill.
+### 3. Chats & Split Bill
+- **Real-time Chat**: Discuss payments and split bills in real-time.
+- **Notifications**: Reliable read receipts and unread indicators synchronized across devices.
+- **Split Bill (N-bbang)**: Select multiple friends to split a bill within a chat.
 - **Flexible Adjustment**: Automatically calculates 1/N, with options to adjust individual shares.
-- **Batch Requests**: Sends payment requests to all selected friends in one click.
 
 ### 4. POSTECH Brand UI
-- **Design**: Customized with POSTECH's official brand colors (Red `#A61955`, Orange `#F6A700`).
-- **UX**: Modern, mobile-friendly interface.
+- **Design**: Customized with POSTECH's official brand colors (Red `#A61955`, Orange `#F6A700`, Indigo Accents).
+- **UX**: Modern, mobile-friendly interface with persistent tab states.
 
 ### 5. Credit Card Payment (Simulation)
 - **Mock Payment**: Simulates a Stripe-like credit card payment flow.
@@ -123,7 +125,8 @@ You need to generate a Treasury Wallet and the POINT Token Mint.
 
     # Treasury Secret (From wallet.json)
     # Open wallet.json in the root directory and copy the array content: [12, 34, ...]
-    VITE_TREASURY_SECRET=[12, 34, 56, ...] 
+    # Note: This is now only used by the Vercel serverless function (api/mint.js), not exposed to the client.
+    TREASURY_SECRET=[12, 34, 56, ...] 
     ```
 
 ### 6. App Configuration
@@ -179,8 +182,8 @@ The easiest way to deploy this app is using **Vercel**.
 4.  Import your GitHub repository.
 5.  **Environment Variables**:
     - In the "Configure Project" step, expand **"Environment Variables"**.
-    - Add all variables from your `.env` file (`VITE_FIREBASE_...`, `VITE_TREASURY_SECRET`).
-    - **Note**: For `VITE_TREASURY_SECRET`, paste the array string exactly as it is in your `.env` (e.g., `[12, 34, ...]`).
+    - Add all variables from your `.env` file (`VITE_FIREBASE_...`, `TREASURY_SECRET`).
+    - **Note**: For `TREASURY_SECRET`, paste the array string exactly as it is in your `.env` (e.g., `[12, 34, ...]`).
 6.  Click **"Deploy"**.
 
 ---
@@ -188,10 +191,10 @@ The easiest way to deploy this app is using **Vercel**.
 ## ⚠️ Important Notes
 
 - **Devnet Only**: This application is configured to run on the Solana Devnet.
-- **Security Warning (Critical)**:
-    - This project uses a **Treasury Secret Key** (`VITE_TREASURY_SECRET`) in the frontend code to allow the Admin to mint tokens directly from the browser.
-    - **This is NOT secure for a real production application.** In a real app, the secret key should NEVER be exposed to the client. It should be stored on a secure backend server (e.g., Node.js, Python), and the frontend should send requests to that backend.
-    - **For this Demo**: It is acceptable for demonstration purposes, but be aware that anyone with access to the deployed frontend code could potentially extract this key if they know where to look.
+- **Security**:
+    - This project uses a **Serverless Function** (`api/mint.js`) to handle token minting securely.
+    - The **Treasury Secret Key** (`TREASURY_SECRET`) is stored in the server environment and is **NOT** exposed to the client.
+    - The frontend sends requests to `/api/mint`, which verifies the request and executes the minting on the server side.
 - **Firestore Rules**: In "Test Mode", anyone can read/write to your database. For production, you must configure Firestore Security Rules.
 
 ## 🔒 Firebase Security Rules (Production)
